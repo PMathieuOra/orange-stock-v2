@@ -5,7 +5,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
 import { PageLoader, Empty, Badge, Button } from '../components/ui';
-import { validateSortie } from '../hooks/useSortie';
+import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
+import { touretStatus } from '../lib/helpers';
 
 export default function Sortie() {
   const { items, loading, error, refetch } = useStock();
@@ -18,17 +19,41 @@ export default function Sortie() {
   const [note, setNote] = useState('');
   const [validating, setValidating] = useState(false);
 
+  // Sélecteur de touret (quand on clique sur un câble)
+  const [touretPicker, setTouretPicker] = useState(null); // {item, tourets, loading}
+
   const filtered = items.filter((it) => {
     if (!it.actif) return false;
-    if (it.qty <= 0) return false; // ne pas proposer ce qui est en rupture
+    if (it.qty <= 0) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (it.ref + ' ' + it.nom).toLowerCase().includes(q);
   });
 
-  function addToCart(item) {
+  async function handleAddClick(item) {
+    if (item.type === 'conso') {
+      addConsoToCart(item);
+    } else {
+      // Câble : ouvrir le sélecteur de touret
+      setTouretPicker({ item, tourets: [], loading: true });
+      const res = await fetchTouretsForRef(item.ref, service, magasin);
+      if (!res.ok) {
+        toast(res.error, 'error');
+        setTouretPicker(null);
+        return;
+      }
+      if (res.tourets.length === 0) {
+        toast('Aucun touret disponible avec du stock', 'error');
+        setTouretPicker(null);
+        return;
+      }
+      setTouretPicker({ item, tourets: res.tourets, loading: false });
+    }
+  }
+
+  function addConsoToCart(item) {
     setCart((c) => {
-      const existing = c.find((x) => x.ref === item.ref && x.type === item.type);
+      const existing = c.find((x) => x.ref === item.ref && x.type === 'conso');
       if (existing) {
         const newQty = Math.min(existing.qty + 1, item.qty);
         if (newQty === existing.qty) {
@@ -37,20 +62,50 @@ export default function Sortie() {
         }
         return c.map((x) => (x === existing ? { ...x, qty: newQty } : x));
       }
-      return [...c, { ref: item.ref, nom: item.nom, type: item.type, qty: 1, qtyDispo: item.qty }];
+      return [...c, { ref: item.ref, nom: item.nom, type: 'conso', qty: 1, qtyDispo: item.qty }];
     });
   }
 
-  function setCartQty(ref, type, qty) {
-    setCart((c) => c.map((x) => {
-      if (x.ref !== ref || x.type !== type) return x;
+  function addCableToCart(item, touret, qty) {
+    const q = parseInt(qty) || 0;
+    if (q <= 0) return toast('Quantité invalide', 'error');
+    if (q > touret.restante) return toast(`Maximum disponible : ${touret.restante}m`, 'error');
+
+    setCart((c) => {
+      // Vérifier si ce touret est déjà au panier
+      const existing = c.find((x) => x.type === 'cable' && x.touretId === touret.id);
+      if (existing) {
+        const newQty = existing.qty + q;
+        if (newQty > touret.restante) {
+          toast(`Total dépasserait le stock du touret (${touret.restante}m)`, 'error');
+          return c;
+        }
+        return c.map((x) => (x === existing ? { ...x, qty: newQty } : x));
+      }
+      return [...c, {
+        ref: item.ref,
+        nom: item.nom,
+        type: 'cable',
+        qty: q,
+        qtyDispo: touret.restante,
+        touretId: touret.id,
+        touretRef: touret.ref_touret,
+      }];
+    });
+    setTouretPicker(null);
+    toast(`✓ ${q}m de ${touret.ref_touret} ajoutés`);
+  }
+
+  function setCartQty(idx, qty) {
+    setCart((c) => c.map((x, i) => {
+      if (i !== idx) return x;
       const newQty = Math.max(0, Math.min(qty, x.qtyDispo));
       return { ...x, qty: newQty };
     }).filter((x) => x.qty > 0));
   }
 
-  function removeFromCart(ref, type) {
-    setCart((c) => c.filter((x) => !(x.ref === ref && x.type === type)));
+  function removeFromCart(idx) {
+    setCart((c) => c.filter((_, i) => i !== idx));
   }
 
   function clearCart() {
@@ -70,7 +125,7 @@ export default function Sortie() {
     });
     setValidating(false);
     if (res.ok) {
-      toast(`✓ Sortie validée : ${cart.length} article(s)`, 'success');
+      toast(`✓ Sortie validée : ${cart.length} ligne(s)`, 'success');
       clearCart();
       setCartOpen(false);
       refetch();
@@ -93,50 +148,40 @@ export default function Sortie() {
           placeholder="🔍 Rechercher un article..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            border: '1.5px solid var(--line)',
-            borderRadius: '100px',
-            fontFamily: 'inherit',
-            fontSize: 14,
-            fontWeight: 600,
-            outline: 'none',
-            marginBottom: 16,
-          }}
+          style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 16 }}
         />
 
         {error && (
           <div style={{ padding: 16, background: 'var(--red-light)', color: 'var(--red)', borderRadius: 'var(--radius)', fontWeight: 600, marginBottom: 16 }}>
-            Erreur de chargement : {error}. Vérifiez votre connexion Supabase (.env).
+            Erreur : {error}.
           </div>
         )}
 
-        {loading ? (
-          <PageLoader />
-        ) : filtered.length === 0 ? (
-          <Empty icon="🔍" text={search ? "Aucun résultat" : "Aucun article disponible"} sub={search ? "Essayez un autre terme." : "Tous les articles sont en rupture ou désactivés."} />
+        {loading ? <PageLoader /> : filtered.length === 0 ? (
+          <Empty icon="🔍" text={search ? 'Aucun résultat' : 'Aucun article disponible'} sub={search ? 'Essayez un autre terme.' : 'Tous les articles sont en rupture ou désactivés.'} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: cart.length > 0 ? 120 : 20 }}>
             {filtered.map((it) => {
-              const inCart = cart.find((c) => c.ref === it.ref && c.type === it.type);
+              const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type);
+              const inCartTotal = inCartLines.reduce((s, x) => s + x.qty, 0);
               return (
-                <div key={`${it.type}-${it.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCart ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
+                <div key={`${it.type}-${it.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{it.nom}</div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
                       <span className="mono">{it.ref}</span>
                       <span>·</span>
                       <span>{it.qty} {it.type === 'cable' ? 'm' : 'u.'}</span>
+                      {it.type === 'cable' && <span>· {it.nb_tourets} touret(s)</span>}
                       {it.est_critique && <Badge color="red">⚠ Critique</Badge>}
-                      {inCart && <Badge color="orange">🛒 {inCart.qty} dans le panier</Badge>}
+                      {inCartTotal > 0 && <Badge color="orange">🛒 {inCartTotal}{it.type === 'cable' ? 'm' : ''} dans le panier</Badge>}
                     </div>
                   </div>
                   <button
-                    onClick={() => addToCart(it)}
+                    onClick={() => handleAddClick(it)}
                     style={{
-                      background: inCart ? 'var(--orange-light)' : 'var(--orange)',
-                      color: inCart ? 'var(--orange-dark)' : 'white',
+                      background: it.type === 'cable' ? 'var(--blue)' : 'var(--orange)',
+                      color: 'white',
                       border: 'none',
                       borderRadius: '100px',
                       padding: '8px 16px',
@@ -147,7 +192,7 @@ export default function Sortie() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {inCart ? '+ 1' : '+ Ajouter'}
+                    {it.type === 'cable' ? '🔌 Choisir' : '+ Ajouter'}
                   </button>
                 </div>
               );
@@ -156,33 +201,25 @@ export default function Sortie() {
         )}
       </div>
 
+      {/* Sélecteur de touret */}
+      {touretPicker && (
+        <TouretPicker
+          item={touretPicker.item}
+          tourets={touretPicker.tourets}
+          loading={touretPicker.loading}
+          onClose={() => setTouretPicker(null)}
+          onAdd={(touret, qty) => addCableToCart(touretPicker.item, touret, qty)}
+        />
+      )}
+
       {/* Cart sticky bar */}
       {cart.length > 0 && !cartOpen && (
         <button
           onClick={() => setCartOpen(true)}
-          style={{
-            position: 'fixed',
-            bottom: 90,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'calc(100% - 40px)',
-            maxWidth: 440,
-            background: 'var(--ink)',
-            color: 'white',
-            borderRadius: 'var(--radius-lg)',
-            padding: '14px 18px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            boxShadow: 'var(--shadow-lg)',
-            zIndex: 30,
-            border: 'none',
-            fontFamily: 'inherit',
-            cursor: 'pointer',
-          }}
+          style={{ position: 'fixed', bottom: 90, left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 40px)', maxWidth: 440, background: 'var(--ink)', color: 'white', borderRadius: 'var(--radius-lg)', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: 'var(--shadow-lg)', zIndex: 30, border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
         >
           <span style={{ fontWeight: 700, fontSize: 14 }}>
-            🛒 {totalItems} article{totalItems > 1 ? 's' : ''} ({cart.length} ligne{cart.length > 1 ? 's' : ''})
+            🛒 {cart.length} ligne{cart.length > 1 ? 's' : ''}
           </span>
           <span style={{ background: 'var(--orange)', color: 'white', padding: '6px 14px', borderRadius: '100px', fontWeight: 700, fontSize: 13 }}>
             Voir le panier →
@@ -208,47 +245,145 @@ export default function Sortie() {
   );
 }
 
-// ===== CART MODAL =====
-function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, onValidate, validating }) {
-  const totalItems = cart.reduce((s, x) => s + x.qty, 0);
+// ===== TOURET PICKER =====
+function TouretPicker({ item, tourets, loading, onClose, onAdd }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [qty, setQty] = useState('');
+
+  const selected = tourets.find((t) => t.id === selectedId);
+
+  function handleAdd() {
+    if (!selected) return;
+    onAdd(selected, parseInt(qty) || 0);
+  }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0', width: '100%', maxWidth: 500, maxHeight: '90vh', display: 'flex', flexDirection: 'column', animation: 'slide-up 0.25s cubic-bezier(0.2,0,0,1)' }}>
-        {/* Header */}
-        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0', width: '100%', maxWidth: 500, maxHeight: '85vh', display: 'flex', flexDirection: 'column', animation: 'slide-up 0.25s cubic-bezier(0.2,0,0,1)' }}>
+        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>🛒 Panier</div>
-            <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>{totalItems} article{totalItems > 1 ? 's' : ''} · {cart.length} ligne{cart.length > 1 ? 's' : ''}</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>🔌 Choisir un touret</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600, marginTop: 2 }}>{item.nom}</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>{item.ref}</div>
           </div>
           <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: '100px', background: 'var(--bg)', border: 'none', cursor: 'pointer', fontSize: 18, fontWeight: 800 }}>×</button>
         </div>
 
-        {/* Lines */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
-          {cart.map((item) => (
-            <div key={`${item.type}-${item.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: '1px solid var(--line-2)' }}>
+          {loading ? <PageLoader /> : tourets.length === 0 ? (
+            <Empty icon="🎰" text="Aucun touret disponible" />
+          ) : (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+                Tourets disponibles ({tourets.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {tourets.map((t) => {
+                  const status = touretStatus(t);
+                  const isSelected = selectedId === t.id;
+                  const statusColors = { neuf: 'green', entame: 'amber', vide: 'red' };
+                  const statusLabels = { neuf: '🆕 Neuf', entame: '🔄 Entamé', vide: '⚠ Vide' };
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => { setSelectedId(t.id); setQty(''); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '14px 16px',
+                        background: isSelected ? 'var(--orange-light)' : 'white',
+                        border: `1.5px solid ${isSelected ? 'var(--orange)' : 'var(--line)'}`,
+                        borderRadius: 'var(--radius)',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{t.ref_touret}</div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
+                          Initial : {t.initiale}m
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div className="mono" style={{ fontSize: 16, fontWeight: 800, color: isSelected ? 'var(--orange-dark)' : 'var(--ink)' }}>{t.restante}m</div>
+                        <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selected && (
+                <div style={{ marginTop: 18, padding: 16, background: 'var(--orange-light)', border: '1.5px solid var(--orange)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--orange-dark)', marginBottom: 8 }}>
+                    Touret sélectionné : <span className="mono">{selected.ref_touret}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number"
+                      min="1"
+                      max={selected.restante}
+                      value={qty}
+                      onChange={(e) => setQty(e.target.value)}
+                      placeholder={`Quantité en mètres (max ${selected.restante})`}
+                      autoFocus
+                      style={{ flex: 1, padding: 12, border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, outline: 'none' }}
+                    />
+                    <Button onClick={handleAdd} disabled={!qty || parseInt(qty) <= 0}>+ Ajouter</Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== CART MODAL =====
+function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, onValidate, validating }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0', width: '100%', maxWidth: 500, maxHeight: '90vh', display: 'flex', flexDirection: 'column', animation: 'slide-up 0.25s cubic-bezier(0.2,0,0,1)' }}>
+        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>🛒 Panier</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>{cart.length} ligne{cart.length > 1 ? 's' : ''}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: '100px', background: 'var(--bg)', border: 'none', cursor: 'pointer', fontSize: 18, fontWeight: 800 }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
+          {cart.map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: '1px solid var(--line-2)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{item.nom}</div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>{item.ref} · dispo : {item.qtyDispo} {item.type === 'cable' ? 'm' : 'u.'}</div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>
+                  {item.ref}
+                  {item.type === 'cable' && ` · 🎰 ${item.touretRef}`}
+                  {' · dispo : '}{item.qtyDispo}{item.type === 'cable' ? 'm' : 'u.'}
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button onClick={() => onSetQty(item.ref, item.type, item.qty - 1)} style={qtyBtn}>−</button>
+                <button onClick={() => onSetQty(idx, item.qty - 1)} style={qtyBtn}>−</button>
                 <input
                   type="number"
                   min="1"
                   max={item.qtyDispo}
                   value={item.qty}
-                  onChange={(e) => onSetQty(item.ref, item.type, parseInt(e.target.value) || 0)}
+                  onChange={(e) => onSetQty(idx, parseInt(e.target.value) || 0)}
                   style={{ width: 56, padding: '6px 4px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center', fontSize: 14 }}
                 />
-                <button onClick={() => onSetQty(item.ref, item.type, item.qty + 1)} style={qtyBtn} disabled={item.qty >= item.qtyDispo}>+</button>
+                <button onClick={() => onSetQty(idx, item.qty + 1)} style={qtyBtn} disabled={item.qty >= item.qtyDispo}>+</button>
               </div>
-              <button onClick={() => onRemove(item.ref, item.type)} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
+              <button onClick={() => onRemove(idx)} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
             </div>
           ))}
 
-          {/* Note */}
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>Note (optionnelle)</div>
             <textarea
@@ -261,11 +396,10 @@ function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, 
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{ padding: '14px 20px', borderTop: '1px solid var(--line)', display: 'flex', gap: 8, background: 'var(--bg)' }}>
           <Button variant="secondary" onClick={onClear} disabled={validating} style={{ flex: 1 }}>Vider</Button>
           <Button onClick={onValidate} disabled={validating || cart.length === 0} style={{ flex: 2 }}>
-            {validating ? 'Validation...' : `✓ Valider la sortie (${totalItems})`}
+            {validating ? 'Validation...' : `✓ Valider la sortie`}
           </Button>
         </div>
       </div>
@@ -273,14 +407,4 @@ function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, 
   );
 }
 
-const qtyBtn = {
-  width: 30,
-  height: 30,
-  borderRadius: '100px',
-  background: 'var(--bg)',
-  border: '1.5px solid var(--line)',
-  cursor: 'pointer',
-  fontWeight: 800,
-  fontSize: 14,
-  fontFamily: 'inherit',
-};
+const qtyBtn = { width: 30, height: 30, borderRadius: '100px', background: 'var(--bg)', border: '1.5px solid var(--line)', cursor: 'pointer', fontWeight: 800, fontSize: 14, fontFamily: 'inherit' };

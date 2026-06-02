@@ -88,18 +88,38 @@ export async function parseFile(file) {
     }
 
     // Détecter la ligne d'entête : chercher une ligne contenant 'ref' et 'nom'
+    // On accepte plusieurs variantes de noms pour chaque colonne (insensible casse/accents/espaces).
+    const normalize = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').trim();
+
+    const COL_ALIASES = {
+      ref:     ['ref', 'reference', 'reference', 'code'],
+      nom:     ['nom', 'libelle', 'designation', 'description', 'name'],
+      seuil:   ['seuil', 'seuilalerte', 'alerte', 'min', 'minimum', 'stockmin'],
+      qty:     ['qty', 'quantite', 'qte', 'quantity', 'stock'],
+      prix_ht: ['prix_ht', 'prixht', 'prix', 'prixunitaire', 'tarif', 'pu', 'puht', 'cout', 'price'],
+    };
+
+    function findCol(row, aliases) {
+      for (let i = 0; i < row.length; i++) {
+        if (aliases.includes(normalize(row[i]))) return i;
+      }
+      return -1;
+    }
+
     let headerIdx = -1;
     let headerMap = null;
     for (let i = 0; i < Math.min(5, rows.length); i++) {
-      const row = (rows[i] || []).map((c) => String(c).toLowerCase().trim());
-      if (row.includes('ref') && row.includes('nom')) {
+      const row = (rows[i] || []).map((c) => String(c).trim());
+      const refIdx = findCol(row, COL_ALIASES.ref);
+      const nomIdx = findCol(row, COL_ALIASES.nom);
+      if (refIdx >= 0 && nomIdx >= 0) {
         headerIdx = i;
         headerMap = {
-          ref: row.indexOf('ref'),
-          nom: row.indexOf('nom'),
-          seuil: row.indexOf('seuil'),
-          qty: row.indexOf('qty'),
-          prix_ht: row.indexOf('prix_ht'), // -1 si absente = OK
+          ref: refIdx,
+          nom: nomIdx,
+          seuil: findCol(row, COL_ALIASES.seuil),
+          qty: findCol(row, COL_ALIASES.qty),
+          prix_ht: findCol(row, COL_ALIASES.prix_ht), // -1 si absente = OK
         };
         break;
       }
@@ -118,12 +138,12 @@ export async function parseFile(file) {
       const row = rows[i] || [];
       const ref = String(row[headerMap.ref] ?? '').trim();
       const nom = String(row[headerMap.nom] ?? '').trim();
-      const seuilRaw = row[headerMap.seuil];
-      const qtyRaw = row[headerMap.qty];
+      const seuilRaw = headerMap.seuil >= 0 ? row[headerMap.seuil] : 0;
+      const qtyRaw = headerMap.qty >= 0 ? row[headerMap.qty] : 0;
       const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
 
       // Ligne entièrement vide → skip silencieux
-      if (!ref && !nom && seuilRaw === '' && qtyRaw === '') continue;
+      if (!ref && !nom) continue;
 
       // Validation
       if (!ref) {
@@ -134,15 +154,22 @@ export async function parseFile(file) {
         errors.push(`Ligne ${i + 1} (${ref}) : nom vide`);
         continue;
       }
-      const seuil = parseInt(seuilRaw);
-      const qty = parseInt(qtyRaw);
-      if (isNaN(seuil) || seuil < 0) {
-        errors.push(`Ligne ${i + 1} (${ref}) : seuil invalide`);
-        continue;
+      // Parser seuil et qty avec tolérance (vide → 0)
+      let seuil = 0;
+      if (seuilRaw !== '' && seuilRaw !== null && seuilRaw !== undefined) {
+        seuil = parseInt(seuilRaw);
+        if (isNaN(seuil) || seuil < 0) {
+          errors.push(`Ligne ${i + 1} (${ref}) : seuil invalide`);
+          continue;
+        }
       }
-      if (isNaN(qty) || qty < 0) {
-        errors.push(`Ligne ${i + 1} (${ref}) : qty invalide`);
-        continue;
+      let qty = 0;
+      if (qtyRaw !== '' && qtyRaw !== null && qtyRaw !== undefined) {
+        qty = parseInt(qtyRaw);
+        if (isNaN(qty) || qty < 0) {
+          errors.push(`Ligne ${i + 1} (${ref}) : qty invalide`);
+          continue;
+        }
       }
 
       // Prix : accepter virgule ou point, vide = 0

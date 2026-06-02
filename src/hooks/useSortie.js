@@ -1,14 +1,29 @@
 import { supabase } from '../lib/supabase';
 
+// Récupère les tourets disponibles pour un câble (avec restante > 0)
+export async function fetchTouretsForRef(refType, service, magasin) {
+  const { data: tc, error } = await supabase
+    .from('types_cable')
+    .select('id, nom, prix_ht, tourets(id, ref_touret, initiale, restante)')
+    .eq('ref_type', refType)
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .maybeSingle();
+  if (error || !tc) return { ok: false, error: error?.message || 'Câble introuvable' };
+  // Filtrer les tourets avec du stock
+  const tourets = (tc.tourets || []).filter((t) => t.restante > 0);
+  return { ok: true, nom: tc.nom, prix_ht: tc.prix_ht || 0, tourets };
+}
+
 // Sortie de stock pour un panier
-// cart = [{ ref, nom, type, qty }]
-// Pour les conso : décrémente articles_conso.qty
-// Pour les câbles : décrémente les tourets (entamés en priorité, puis neufs)
-// Logue chaque mouvement dans mouvements
+// cart = [
+//   { ref, nom, type: 'conso', qty },
+//   { ref, nom, type: 'cable', qty, touretId, touretRef }  // touret choisi par l'user
+// ]
 export async function validateSortie({ cart, service, magasin, userId, note = '' }) {
   if (!cart || cart.length === 0) return { ok: false, error: 'Panier vide' };
 
-  // 1. Vérification préalable : on a bien le stock pour tout
+  // 1. Vérification préalable
   const checks = [];
   for (const item of cart) {
     if (item.type === 'conso') {
@@ -24,23 +39,20 @@ export async function validateSortie({ cart, service, magasin, userId, note = ''
       if (art.qty < item.qty) return { ok: false, error: `Stock insuffisant pour ${art.nom} (${art.qty} disponible, ${item.qty} demandé)` };
       checks.push({ ...item, articleId: art.id, qtyDispo: art.qty });
     } else {
-      // Câble : récupérer le type + ses tourets
-      const { data: tc, error: e1 } = await supabase
-        .from('types_cable')
-        .select('id, nom, tourets(id, ref_touret, initiale, restante)')
-        .eq('ref_type', item.ref)
-        .eq('service_id', service)
-        .eq('magasin_id', magasin)
+      // Câble : on a un touret spécifique
+      if (!item.touretId) return { ok: false, error: `Aucun touret sélectionné pour ${item.nom}` };
+      const { data: t, error } = await supabase
+        .from('tourets')
+        .select('id, ref_touret, restante, initiale, type_cable_id')
+        .eq('id', item.touretId)
         .maybeSingle();
-      if (e1) return { ok: false, error: 'Erreur lecture câbles : ' + e1.message };
-      if (!tc) return { ok: false, error: `Câble ${item.ref} introuvable` };
-      const totalDispo = (tc.tourets || []).reduce((s, t) => s + t.restante, 0);
-      if (totalDispo < item.qty) return { ok: false, error: `Stock insuffisant pour ${tc.nom} (${totalDispo}m disponible, ${item.qty}m demandé)` };
-      checks.push({ ...item, typeCableId: tc.id, tourets: tc.tourets || [], qtyDispo: totalDispo });
+      if (error || !t) return { ok: false, error: `Touret ${item.touretRef || item.touretId} introuvable` };
+      if (t.restante < item.qty) return { ok: false, error: `Stock insuffisant sur le touret ${t.ref_touret} (${t.restante}m disponibles, ${item.qty}m demandés)` };
+      checks.push({ ...item, touretData: t });
     }
   }
 
-  // 2. Application : décrémenter le stock + logger
+  // 2. Application
   const mouvementsToLog = [];
   for (const item of checks) {
     if (item.type === 'conso') {
@@ -58,34 +70,15 @@ export async function validateSortie({ cart, service, magasin, userId, note = ''
         note,
       });
     } else {
-      // Câble : décrémenter les tourets dans l'ordre : entamés (restante > 0 et < initiale) d'abord, puis neufs
-      let reste = item.qty;
-      const sortedTourets = [...item.tourets].sort((a, b) => {
-        const aEntame = a.restante > 0 && a.restante < a.initiale;
-        const bEntame = b.restante > 0 && b.restante < b.initiale;
-        if (aEntame && !bEntame) return -1;
-        if (!aEntame && bEntame) return 1;
-        // Sinon, plus petit restant d'abord (vider les bobines presque finies)
-        return a.restante - b.restante;
-      });
+      // Câble : décrémenter le touret choisi
+      const t = item.touretData;
+      const nouvelleRestante = t.restante - item.qty;
+      const { error } = await supabase.from('tourets').update({ restante: nouvelleRestante }).eq('id', t.id);
+      if (error) return { ok: false, error: 'Erreur touret : ' + error.message };
 
-      const touretUpdates = [];
-      for (const t of sortedTourets) {
-        if (reste <= 0) break;
-        if (t.restante <= 0) continue;
-        const prise = Math.min(t.restante, reste);
-        touretUpdates.push({ id: t.id, ref_touret: t.ref_touret, nouvelleRestante: t.restante - prise, prise });
-        reste -= prise;
-      }
-      // Appliquer
-      for (const u of touretUpdates) {
-        const { error } = await supabase.from('tourets').update({ restante: u.nouvelleRestante }).eq('id', u.id);
-        if (error) return { ok: false, error: 'Erreur touret : ' + error.message };
-      }
-      // Note enrichie : liste des tourets utilisés
       const noteEnrichie = note
-        ? `${note} | Tourets : ${touretUpdates.map((u) => `${u.ref_touret}(-${u.prise}m)`).join(', ')}`
-        : `Tourets : ${touretUpdates.map((u) => `${u.ref_touret}(-${u.prise}m)`).join(', ')}`;
+        ? `${note} | Touret ${t.ref_touret} : ${t.restante}m → ${nouvelleRestante}m`
+        : `Touret ${t.ref_touret} : ${t.restante}m → ${nouvelleRestante}m`;
       mouvementsToLog.push({
         type: 'sortie',
         service_id: service,
@@ -99,7 +92,7 @@ export async function validateSortie({ cart, service, magasin, userId, note = ''
     }
   }
 
-  // 3. Logger tous les mouvements d'un coup
+  // 3. Logger tous les mouvements
   if (mouvementsToLog.length) {
     const { error } = await supabase.from('mouvements').insert(mouvementsToLog);
     if (error) return { ok: false, error: 'Erreur log mouvements : ' + error.message };

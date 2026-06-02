@@ -30,13 +30,40 @@ export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateConso(id, { nom, seuil, prix_ht }) {
+export async function updateConso(id, { nom, seuil, prix_ht, qty, userId, oldQty }) {
   const updates = {};
   if (nom !== undefined) updates.nom = nom;
   if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
   if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  if (qty !== undefined) updates.qty = Math.max(0, parseInt(qty) || 0);
+
   const { error } = await supabase.from('articles_conso').update(updates).eq('id', id);
-  return { ok: !error, error: error?.message };
+  if (error) return { ok: false, error: error.message };
+
+  // Si la quantité a changé, logguer un mouvement d'ajustement
+  if (qty !== undefined && oldQty !== undefined && updates.qty !== oldQty) {
+    const diff = updates.qty - oldQty;
+    // Récupérer les infos de l'article pour logguer correctement
+    const { data: article } = await supabase
+      .from('articles_conso')
+      .select('ref, nom, service_id, magasin_id')
+      .eq('id', id)
+      .single();
+    if (article) {
+      await supabase.from('mouvements').insert({
+        type: 'ajustement',
+        service_id: article.service_id,
+        magasin_id: article.magasin_id,
+        ref: article.ref,
+        nom: article.nom,
+        qty: diff,
+        user_id: userId || null,
+        note: `Ajustement manuel : ${oldQty} → ${updates.qty}`,
+      });
+    }
+  }
+
+  return { ok: true };
 }
 
 export async function toggleConsoActif(id, actif) {

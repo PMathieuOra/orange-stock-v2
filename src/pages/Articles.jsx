@@ -16,7 +16,7 @@ import {
 import { downloadTemplate, parseFile, importConsos } from '../hooks/useImport';
 
 export default function Articles() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const { service: sessionSvc, magasin: sessionMag } = useSession();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -87,6 +87,7 @@ export default function Articles() {
         data={form.data}
         service={activeService}
         magasin={activeMagasin}
+        userId={currentUser?.id}
         onCancel={() => { setView(detail ? 'detail' : 'list'); setForm(null); }}
         onDone={async (newOrUpdated) => {
           setForm(null);
@@ -408,7 +409,7 @@ function TouretForm({ typeCableId, onCancel, onDone, toast }) {
 }
 
 // ===== FORM VIEW (create / edit article) =====
-function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast }) {
+function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone, toast }) {
   const isCable = type === 'cable';
   const isEdit = mode === 'edit';
   const [ref, setRef] = useState(isEdit ? (isCable ? data.ref_type : data.ref) : '');
@@ -416,6 +417,7 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
   const [seuil, setSeuil] = useState(isEdit ? data.seuil : (isCable ? 200 : 10));
   const [categorie, setCategorie] = useState(isEdit && isCable ? data.categorie : 'fibre');
   const [prixHt, setPrixHt] = useState(isEdit ? (data.prix_ht || 0) : 0);
+  const [qty, setQty] = useState(isEdit && !isCable ? (data.qty || 0) : 0);
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -425,10 +427,18 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
 
     if (isEdit) {
       const fn = isCable ? updateCable : updateConso;
-      const payload = isCable ? { nom, categorie, seuil, prix_ht: prixHt } : { nom, seuil, prix_ht: prixHt };
+      const payload = isCable
+        ? { nom, categorie, seuil, prix_ht: prixHt }
+        : { nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
       const res = await fn(data.id, payload);
       setSaving(false);
-      if (res.ok) { toast(`✓ ${nom} mis à jour`, 'success'); onDone({ ...data, ...payload }); }
+      if (res.ok) {
+        const updatedData = isCable
+          ? { ...data, nom, categorie, seuil, prix_ht: prixHt }
+          : { ...data, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0 };
+        toast(`✓ ${nom} mis à jour`, 'success');
+        onDone(updatedData);
+      }
       else toast('Erreur : ' + res.error, 'error');
     } else {
       const fn = isCable ? createCable : createConso;
@@ -475,6 +485,15 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
         <Field label={`Seuil d'alerte ${isCable ? '(m)' : '(unités)'}`} required>
           <input type="number" min="0" value={seuil} onChange={(e) => setSeuil(e.target.value)} style={input} />
         </Field>
+
+        {isEdit && !isCable && (
+          <Field label="Quantité en stock (unités)">
+            <input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} style={input} />
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>
+              Modifier cette valeur enregistre un mouvement d'ajustement dans le journal.
+            </div>
+          </Field>
+        )}
 
         <Field label={`Prix unitaire HT ${isCable ? '(€/m)' : '(€)'}`}>
           <input
