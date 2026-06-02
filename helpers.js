@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --orange: #FF7900;
+  --orange-dark: #E66E00;
+  --orange-light: #FFF5EB;
+  --orange-glow: rgba(255, 121, 0, 0.12);
+  --ink: #0A0A0A;
+  --ink-2: #2C2C2C;
+  --ink-3: #5C5C5C;
+  --ink-4: #9A9A9A;
+  --line: #ECECEC;
+  --line-2: #F5F5F5;
+  --bg: #FAFAFA;
+  --white: #FFFFFF;
+  --green: #00A86B;
+  --green-light: #E8F7F0;
+  --red: #E63946;
+  --red-light: #FDECEE;
+  --amber: #F59E0B;
+  --amber-light: #FEF6E7;
+  --blue: #2563EB;
+  --blue-light: #EFF4FF;
+  --purple: #7C3AED;
+  --purple-light: #F3EFFF;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 4px 16px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 36px rgba(0,0,0,0.10);
+  --shadow-orange: 0 8px 24px rgba(255, 121, 0, 0.25);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Manrope', -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+#root { min-height: 100vh; }
+
+.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.02em; }
+
+/* Avatar gradients */
+.c-orange { background: linear-gradient(135deg, #FF7900, #FFA855); }
+.c-blue   { background: linear-gradient(135deg, #2563EB, #5C8BFF); }
+.c-green  { background: linear-gradient(135deg, #00A86B, #34D399); }
+.c-purple { background: linear-gradient(135deg, #7C3AED, #A78BFA); }
+.c-pink   { background: linear-gradient(135deg, #EC4899, #F472B6); }
+.c-teal   { background: linear-gradient(135deg, #0D9488, #2DD4BF); }
+.c-indigo { background: linear-gradient(135deg, #4F46E5, #818CF8); }
+.c-rose   { background: linear-gradient(135deg, #F43F5E, #FB7185); }
+
+/* Toast animations */
+@keyframes toast-in {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbar hide utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
