@@ -1,0 +1,213 @@
+import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
+
+// ===== TEMPLATE =====
+
+const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty'];
+const TEMPLATE_EXAMPLES = [
+  ['PRJ45-C6', 'Patch RJ45 Cat6 1m', 10, 42],
+  ['F-OM4-LC2', 'Jarretière fibre OM4 LC-LC 2m', 15, 12],
+  ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4],
+];
+
+// Génère un fichier Excel modèle et déclenche le téléchargement
+export function downloadTemplate(format = 'xlsx') {
+  if (format === 'csv') {
+    const csv = [
+      TEMPLATE_HEADERS.join(','),
+      ...TEMPLATE_EXAMPLES.map((row) => row.map((v) => `"${v}"`).join(',')),
+    ].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    triggerDownload(blob, 'modele-import-conso.csv');
+    return;
+  }
+
+  // Excel
+  const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLES]);
+  // Largeurs de colonnes
+  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Consommables');
+
+  // Feuille d'aide
+  const help = XLSX.utils.aoa_to_sheet([
+    ['MODE D\'EMPLOI'],
+    [],
+    ['Colonne', 'Description', 'Obligatoire'],
+    ['ref', 'Référence unique de l\'article (ex: PRJ45-C6)', 'Oui'],
+    ['nom', 'Nom complet affiché dans l\'app', 'Oui'],
+    ['seuil', 'Seuil d\'alerte critique (entier ≥ 0)', 'Oui'],
+    ['qty', 'Quantité initiale en stock (entier ≥ 0)', 'Oui'],
+    [],
+    ['Conseils :'],
+    ['- Les lignes avec une ref déjà existante seront ignorées'],
+    ['- Le service et le magasin de destination sont définis par les pastilles dans l\'app au moment de l\'import'],
+    ['- Vous pouvez supprimer les lignes d\'exemple avant d\'importer'],
+  ]);
+  help['!cols'] = [{ wch: 14 }, { wch: 50 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, help, 'Aide');
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  triggerDownload(blob, 'modele-import-conso.xlsx');
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ===== PARSING =====
+
+// Lit un fichier Excel ou CSV et renvoie un tableau d'objets {ref, nom, seuil, qty}
+export async function parseFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const isCSV = ext === 'csv';
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, {
+      type: 'array',
+      cellDates: false,
+      // Pour CSV, indiquer l'encoding
+      ...(isCSV ? { raw: true } : {}),
+    });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', header: 1 });
+
+    if (rows.length === 0) {
+      return { ok: false, error: 'Fichier vide' };
+    }
+
+    // Détecter la ligne d'entête : chercher une ligne contenant 'ref' et 'nom'
+    let headerIdx = -1;
+    let headerMap = null;
+    for (let i = 0; i < Math.min(5, rows.length); i++) {
+      const row = (rows[i] || []).map((c) => String(c).toLowerCase().trim());
+      if (row.includes('ref') && row.includes('nom')) {
+        headerIdx = i;
+        headerMap = {
+          ref: row.indexOf('ref'),
+          nom: row.indexOf('nom'),
+          seuil: row.indexOf('seuil'),
+          qty: row.indexOf('qty'),
+        };
+        break;
+      }
+    }
+
+    if (headerIdx === -1) {
+      return {
+        ok: false,
+        error: 'Entête introuvable. Le fichier doit contenir une ligne avec les colonnes : ref, nom, seuil, qty',
+      };
+    }
+
+    const items = [];
+    const errors = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const ref = String(row[headerMap.ref] ?? '').trim();
+      const nom = String(row[headerMap.nom] ?? '').trim();
+      const seuilRaw = row[headerMap.seuil];
+      const qtyRaw = row[headerMap.qty];
+
+      // Ligne entièrement vide → skip silencieux
+      if (!ref && !nom && seuilRaw === '' && qtyRaw === '') continue;
+
+      // Validation
+      if (!ref) {
+        errors.push(`Ligne ${i + 1} : référence vide`);
+        continue;
+      }
+      if (!nom) {
+        errors.push(`Ligne ${i + 1} (${ref}) : nom vide`);
+        continue;
+      }
+      const seuil = parseInt(seuilRaw);
+      const qty = parseInt(qtyRaw);
+      if (isNaN(seuil) || seuil < 0) {
+        errors.push(`Ligne ${i + 1} (${ref}) : seuil invalide`);
+        continue;
+      }
+      if (isNaN(qty) || qty < 0) {
+        errors.push(`Ligne ${i + 1} (${ref}) : qty invalide`);
+        continue;
+      }
+
+      items.push({ ref, nom, seuil, qty });
+    }
+
+    return { ok: true, items, errors };
+  } catch (e) {
+    return { ok: false, error: 'Erreur de lecture du fichier : ' + e.message };
+  }
+}
+
+// ===== IMPORT =====
+
+// Importe les items dans la base, en sautant les doublons.
+// Renvoie un rapport détaillé.
+export async function importConsos({ items, service, magasin }) {
+  if (!items || items.length === 0) return { ok: false, error: 'Aucun article à importer' };
+
+  // 1. Récupérer toutes les refs existantes pour ce scope
+  const refsToCheck = items.map((i) => i.ref);
+  const { data: existing, error: e1 } = await supabase
+    .from('articles_conso')
+    .select('ref')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .in('ref', refsToCheck);
+
+  if (e1) return { ok: false, error: 'Erreur lecture base : ' + e1.message };
+
+  const existingRefs = new Set((existing || []).map((r) => r.ref));
+
+  // 2. Filtrer ce qui est à insérer
+  const toInsert = [];
+  const skipped = [];
+  for (const it of items) {
+    if (existingRefs.has(it.ref)) {
+      skipped.push(it.ref);
+    } else {
+      toInsert.push({
+        ref: it.ref,
+        nom: it.nom,
+        seuil: it.seuil,
+        qty: it.qty,
+        service_id: service,
+        magasin_id: magasin,
+        actif: true,
+      });
+    }
+  }
+
+  // 3. Insérer (par batches de 100 pour gérer les gros imports)
+  let inserted = 0;
+  const insertErrors = [];
+  const BATCH = 100;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const { error } = await supabase.from('articles_conso').insert(batch);
+    if (error) {
+      insertErrors.push(`Batch ${i / BATCH + 1} : ${error.message}`);
+    } else {
+      inserted += batch.length;
+    }
+  }
+
+  return {
+    ok: true,
+    inserted,
+    skipped,
+    insertErrors,
+    total: items.length,
+  };
+}
