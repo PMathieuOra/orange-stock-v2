@@ -5,6 +5,7 @@ import SessionSelectors from './SessionSelectors';
 
 const NAV_ITEMS = [
   { to: '/sortie', label: 'Sortie', icon: 'cart' },
+  { to: '/entree', label: 'Entrée', icon: 'inbox' },
   { to: '/stock', label: 'Stock', icon: 'box' },
   { to: '/stats', label: 'Stats', icon: 'chart', adminOnly: true },
   { to: '/admin', label: 'Admin', icon: 'gear', adminOnly: true },
@@ -28,6 +29,15 @@ function Icon({ name, size = 22 }) {
           <circle cx="9" cy="21" r="1" />
           <circle cx="20" cy="21" r="1" />
           <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+        </svg>
+      );
+    case 'inbox':
+      return (
+        <svg {...props}>
+          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+          <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+          <polyline points="12 7 12 14" />
+          <polyline points="9 10 12 7 15 10" transform="rotate(180 12 8.5)" />
         </svg>
       );
     case 'box':

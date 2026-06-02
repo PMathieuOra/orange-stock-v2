@@ -6,6 +6,7 @@ import { PageLoader } from './components/ui';
 
 import Login from './pages/Login';
 import Sortie from './pages/Sortie';
+import Entree from './pages/Entree';
 import Stock from './pages/Stock';
 import Stats from './pages/Stats';
 import Admin from './pages/Admin';
@@ -29,6 +30,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/sortie" replace /> : <Login />} />
       <Route path="/sortie" element={<Protected><Sortie /></Protected>} />
+      <Route path="/entree" element={<Protected><Entree /></Protected>} />
       <Route path="/stock" element={<Protected><Stock /></Protected>} />
       <Route path="/stats" element={<Protected><Stats /></Protected>} />
       <Route path="/admin" element={<Protected><Admin /></Protected>} />
