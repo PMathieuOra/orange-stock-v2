@@ -7,7 +7,7 @@ import { useToast } from '../contexts/ToastContext';
 import { supabase, getServiceInfo, SERVICES_REF } from '../lib/supabase';
 import { getMagasinInfo, MAGASINS_REF } from '../components/SessionSelectors';
 import { Denied, PageLoader, Empty, Badge, Button } from '../components/ui';
-import { touretStatus } from '../lib/helpers';
+import { touretStatus, fmtPrice } from '../lib/helpers';
 import {
   fetchConsos, createConso, updateConso, toggleConsoActif, deleteConso,
   fetchCables, createCable, updateCable, toggleCableActif, deleteCable,
@@ -298,6 +298,8 @@ function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
           {!isCable && <Info label="Stock actuel" value={`${item.qty} unités`} />}
           {isCable && <Info label="Stock total" value={`${totalRestante} m`} />}
           {isCable && <Info label="Tourets" value={`${tourets.length}`} />}
+          <Info label={`Prix HT ${isCable ? '(€/m)' : '(€/unité)'}`} value={fmtPrice(item.prix_ht)} />
+          <Info label="Valeur du stock" value={fmtPrice((isCable ? totalRestante : item.qty) * (item.prix_ht || 0))} />
         </div>
 
         {isCable && (
@@ -413,6 +415,7 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
   const [nom, setNom] = useState(isEdit ? data.nom : '');
   const [seuil, setSeuil] = useState(isEdit ? data.seuil : (isCable ? 200 : 10));
   const [categorie, setCategorie] = useState(isEdit && isCable ? data.categorie : 'fibre');
+  const [prixHt, setPrixHt] = useState(isEdit ? (data.prix_ht || 0) : 0);
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -422,14 +425,16 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
 
     if (isEdit) {
       const fn = isCable ? updateCable : updateConso;
-      const payload = isCable ? { nom, categorie, seuil } : { nom, seuil };
+      const payload = isCable ? { nom, categorie, seuil, prix_ht: prixHt } : { nom, seuil, prix_ht: prixHt };
       const res = await fn(data.id, payload);
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} mis à jour`, 'success'); onDone({ ...data, ...payload }); }
       else toast('Erreur : ' + res.error, 'error');
     } else {
       const fn = isCable ? createCable : createConso;
-      const payload = isCable ? { ref_type: ref.trim(), nom: nom.trim(), categorie, seuil, service, magasin } : { ref: ref.trim(), nom: nom.trim(), seuil, service, magasin };
+      const payload = isCable
+        ? { ref_type: ref.trim(), nom: nom.trim(), categorie, seuil, prix_ht: prixHt, service, magasin }
+        : { ref: ref.trim(), nom: nom.trim(), seuil, prix_ht: prixHt, service, magasin };
       const res = await fn(payload);
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} créé`, 'success'); onDone(res.data); }
@@ -469,6 +474,21 @@ function FormView({ mode, type, data, service, magasin, onCancel, onDone, toast 
 
         <Field label={`Seuil d'alerte ${isCable ? '(m)' : '(unités)'}`} required>
           <input type="number" min="0" value={seuil} onChange={(e) => setSeuil(e.target.value)} style={input} />
+        </Field>
+
+        <Field label={`Prix unitaire HT ${isCable ? '(€/m)' : '(€)'}`}>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={prixHt}
+            onChange={(e) => setPrixHt(e.target.value)}
+            style={input}
+            placeholder="0.00"
+          />
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>
+            Optionnel. Utilisé pour calculer la valeur du stock et le coût des commandes.
+          </div>
         </Field>
 
         <div style={{ display: 'flex', gap: 10, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
@@ -623,6 +643,7 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
                     <th style={th}>Nom</th>
                     <th style={{ ...th, textAlign: 'right' }}>Seuil</th>
                     <th style={{ ...th, textAlign: 'right' }}>Qty</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Prix HT</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -632,10 +653,11 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
                       <td style={td}>{it.nom}</td>
                       <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.seuil}</td>
                       <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.qty}</td>
+                      <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.prix_ht ? it.prix_ht.toFixed(2) + ' €' : '—'}</td>
                     </tr>
                   ))}
                   {parseResult.items.length > 50 && (
-                    <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: 'var(--ink-4)', fontStyle: 'italic' }}>
+                    <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: 'var(--ink-4)', fontStyle: 'italic' }}>
                       ... et {parseResult.items.length - 50} autre(s)
                     </td></tr>
                   )}

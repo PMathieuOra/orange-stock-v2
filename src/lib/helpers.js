@@ -54,3 +54,15 @@ export function stockLevel(qty, seuil) {
   if (qty <= seuil * 1.5) return 'low';
   return 'ok';
 }
+
+// Formate un prix en euros (HT)
+export function fmtPrice(value, opts = {}) {
+  if (value === null || value === undefined || isNaN(value)) return '—';
+  const n = Number(value);
+  const { showCurrency = true, decimals = 2 } = opts;
+  const formatted = n.toLocaleString('fr-FR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return showCurrency ? `${formatted} €` : formatted;
+}

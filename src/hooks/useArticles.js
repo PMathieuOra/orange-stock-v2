@@ -12,13 +12,14 @@ export async function fetchConsos(service, magasin) {
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-export async function createConso({ ref, nom, seuil, service, magasin }) {
+export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }) {
   const { data, error } = await supabase
     .from('articles_conso')
     .insert({
       ref,
       nom,
       seuil: parseInt(seuil) || 0,
+      prix_ht: parseFloat(prix_ht) || 0,
       qty: 0,
       service_id: service,
       magasin_id: magasin,
@@ -29,11 +30,12 @@ export async function createConso({ ref, nom, seuil, service, magasin }) {
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateConso(id, { nom, seuil }) {
-  const { error } = await supabase
-    .from('articles_conso')
-    .update({ nom, seuil: parseInt(seuil) || 0 })
-    .eq('id', id);
+export async function updateConso(id, { nom, seuil, prix_ht }) {
+  const updates = {};
+  if (nom !== undefined) updates.nom = nom;
+  if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
+  if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  const { error } = await supabase.from('articles_conso').update(updates).eq('id', id);
   return { ok: !error, error: error?.message };
 }
 
@@ -59,7 +61,7 @@ export async function fetchCables(service, magasin) {
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-export async function createCable({ ref_type, nom, categorie, seuil, service, magasin }) {
+export async function createCable({ ref_type, nom, categorie, seuil, prix_ht, service, magasin }) {
   const { data, error } = await supabase
     .from('types_cable')
     .insert({
@@ -67,6 +69,7 @@ export async function createCable({ ref_type, nom, categorie, seuil, service, ma
       nom,
       categorie,
       seuil: parseInt(seuil) || 0,
+      prix_ht: parseFloat(prix_ht) || 0,
       service_id: service,
       magasin_id: magasin,
       actif: true,
@@ -76,11 +79,13 @@ export async function createCable({ ref_type, nom, categorie, seuil, service, ma
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateCable(id, { nom, categorie, seuil }) {
-  const { error } = await supabase
-    .from('types_cable')
-    .update({ nom, categorie, seuil: parseInt(seuil) || 0 })
-    .eq('id', id);
+export async function updateCable(id, { nom, categorie, seuil, prix_ht }) {
+  const updates = {};
+  if (nom !== undefined) updates.nom = nom;
+  if (categorie !== undefined) updates.categorie = categorie;
+  if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
+  if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  const { error } = await supabase.from('types_cable').update(updates).eq('id', id);
   return { ok: !error, error: error?.message };
 }
 

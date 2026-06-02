@@ -3,11 +3,11 @@ import { supabase } from '../lib/supabase';
 
 // ===== TEMPLATE =====
 
-const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty'];
+const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty', 'prix_ht'];
 const TEMPLATE_EXAMPLES = [
-  ['PRJ45-C6', 'Patch RJ45 Cat6 1m', 10, 42],
-  ['F-OM4-LC2', 'Jarretière fibre OM4 LC-LC 2m', 15, 12],
-  ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4],
+  ['PRJ45-C6', 'Patch RJ45 Cat6 1m', 10, 42, 0.85],
+  ['F-OM4-LC2', 'Jarretière fibre OM4 LC-LC 2m', 15, 12, 12.50],
+  ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4, 8.20],
 ];
 
 // Génère un fichier Excel modèle et déclenche le téléchargement
@@ -25,7 +25,7 @@ export function downloadTemplate(format = 'xlsx') {
   // Excel
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLES]);
   // Largeurs de colonnes
-  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Consommables');
 
@@ -38,11 +38,13 @@ export function downloadTemplate(format = 'xlsx') {
     ['nom', 'Nom complet affiché dans l\'app', 'Oui'],
     ['seuil', 'Seuil d\'alerte critique (entier ≥ 0)', 'Oui'],
     ['qty', 'Quantité initiale en stock (entier ≥ 0)', 'Oui'],
+    ['prix_ht', 'Prix unitaire HT en euros (ex: 8.50). 0 si inconnu', 'Non'],
     [],
     ['Conseils :'],
     ['- Les lignes avec une ref déjà existante seront ignorées'],
     ['- Le service et le magasin de destination sont définis par les pastilles dans l\'app au moment de l\'import'],
     ['- Vous pouvez supprimer les lignes d\'exemple avant d\'importer'],
+    ['- Pour le prix : utilisez le point comme séparateur décimal (8.50 et non 8,50)'],
   ]);
   help['!cols'] = [{ wch: 14 }, { wch: 50 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, help, 'Aide');
@@ -97,6 +99,7 @@ export async function parseFile(file) {
           nom: row.indexOf('nom'),
           seuil: row.indexOf('seuil'),
           qty: row.indexOf('qty'),
+          prix_ht: row.indexOf('prix_ht'), // -1 si absente = OK
         };
         break;
       }
@@ -117,6 +120,7 @@ export async function parseFile(file) {
       const nom = String(row[headerMap.nom] ?? '').trim();
       const seuilRaw = row[headerMap.seuil];
       const qtyRaw = row[headerMap.qty];
+      const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
 
       // Ligne entièrement vide → skip silencieux
       if (!ref && !nom && seuilRaw === '' && qtyRaw === '') continue;
@@ -141,7 +145,15 @@ export async function parseFile(file) {
         continue;
       }
 
-      items.push({ ref, nom, seuil, qty });
+      // Prix : accepter virgule ou point, vide = 0
+      let prix_ht = 0;
+      if (prixRaw !== '' && prixRaw !== null && prixRaw !== undefined) {
+        const prixStr = String(prixRaw).replace(',', '.').replace(/[^\d.-]/g, '');
+        const p = parseFloat(prixStr);
+        if (!isNaN(p) && p >= 0) prix_ht = p;
+      }
+
+      items.push({ ref, nom, seuil, qty, prix_ht });
     }
 
     return { ok: true, items, errors };
@@ -182,6 +194,7 @@ export async function importConsos({ items, service, magasin }) {
         nom: it.nom,
         seuil: it.seuil,
         qty: it.qty,
+        prix_ht: it.prix_ht || 0,
         service_id: service,
         magasin_id: magasin,
         actif: true,

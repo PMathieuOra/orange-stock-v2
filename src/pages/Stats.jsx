@@ -4,26 +4,41 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
 import { supabase } from '../lib/supabase';
 import { Denied, PageLoader, Empty } from '../components/ui';
-import { fmtRelative, displayName } from '../lib/helpers';
+import { fmtRelative, displayName, fmtPrice } from '../lib/helpers';
 
 export default function Stats() {
   const { isAdmin } = useAuth();
   const { service, magasin } = useSession();
   const [tab, setTab] = useState('overview');
   const [mouvements, setMouvements] = useState([]);
+  const [stockValue, setStockValue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     if (!service || !magasin) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('mouvements')
-      .select('*, users(prenom, nom_initiale)')
-      .eq('service_id', service)
-      .eq('magasin_id', magasin)
-      .order('created_at', { ascending: false })
-      .limit(500);
-    setMouvements(data || []);
+
+    // Charger en parallèle : mouvements + valeur du stock
+    const [mouvRes, stockRes] = await Promise.all([
+      supabase
+        .from('mouvements')
+        .select('*, users(prenom, nom_initiale)')
+        .eq('service_id', service)
+        .eq('magasin_id', magasin)
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('v_stock_consolide')
+        .select('qty, prix_ht, actif')
+        .eq('service_id', service)
+        .eq('magasin_id', magasin),
+    ]);
+
+    setMouvements(mouvRes.data || []);
+    const total = (stockRes.data || [])
+      .filter((it) => it.actif)
+      .reduce((s, it) => s + it.qty * (it.prix_ht || 0), 0);
+    setStockValue(total);
     setLoading(false);
   }, [service, magasin]);
 
@@ -62,6 +77,7 @@ export default function Stats() {
     { label: 'Commandes', value: nbCmd, color: 'var(--blue)' },
     { label: 'Techniciens', value: techIds.size, color: 'var(--green)' },
     { label: 'Articles', value: refIds.size, color: 'var(--purple)' },
+    { label: 'Valeur stock', value: fmtPrice(stockValue), color: 'var(--green)', isCurrency: true },
   ];
 
   return (
@@ -76,7 +92,7 @@ export default function Stats() {
               {kpis.map((k) => (
                 <div key={k.label} style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', padding: 16, borderLeft: `4px solid ${k.color}` }}>
                   <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginBottom: 8 }}>{k.label}</div>
-                  <div className="mono" style={{ fontSize: 28, fontWeight: 800 }}>{k.value}</div>
+                  <div className="mono" style={{ fontSize: k.isCurrency ? 20 : 28, fontWeight: 800, color: k.isCurrency ? 'var(--green)' : 'var(--ink)' }}>{k.value}</div>
                 </div>
               ))}
             </div>

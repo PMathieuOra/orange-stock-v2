@@ -7,7 +7,7 @@ import { useToast } from '../contexts/ToastContext';
 import { supabase, getServiceInfo } from '../lib/supabase';
 import { getMagasinInfo } from '../components/SessionSelectors';
 import { Denied, PageLoader, Empty, Badge, Button } from '../components/ui';
-import { fmtDate } from '../lib/helpers';
+import { fmtDate, fmtPrice } from '../lib/helpers';
 import {
   genNumeroCommande,
   fetchArticlesForScope,
@@ -68,6 +68,29 @@ export default function Commandes() {
       .select('*, commande_lignes(*)')
       .eq('id', cmd.id)
       .single();
+
+    // Récupérer les prix des articles pour calculer le coût
+    if (data && data.commande_lignes && data.commande_lignes.length) {
+      const refs = data.commande_lignes.map((l) => l.ref);
+      const table = data.type === 'cable' ? 'types_cable' : 'articles_conso';
+      const refCol = data.type === 'cable' ? 'ref_type' : 'ref';
+      const { data: articles } = await supabase
+        .from(table)
+        .select(`${refCol}, prix_ht`)
+        .in(refCol, refs)
+        .eq('service_id', data.service_id)
+        .eq('magasin_id', data.magasin_id);
+
+      const prixByRef = {};
+      (articles || []).forEach((a) => {
+        prixByRef[a[refCol]] = a.prix_ht || 0;
+      });
+      data.commande_lignes = data.commande_lignes.map((l) => ({
+        ...l,
+        prix_ht: prixByRef[l.ref] || 0,
+      }));
+    }
+
     setSelected(data || cmd);
     setView('detail');
   }
@@ -156,17 +179,38 @@ export default function Commandes() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(selected.commande_lignes || []).map((l) => {
               const complete = l.qty_recue >= l.qty_commandee;
+              const sousTotal = l.qty_commandee * (l.prix_ht || 0);
               return (
                 <div key={l.id} style={card}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>{l.ref}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>Reçu {l.qty_recue} / {l.qty_commandee}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
+                      Reçu {l.qty_recue} / {l.qty_commandee}
+                      {l.prix_ht > 0 && ` · ${fmtPrice(l.prix_ht)}${selected.type === 'cable' ? '/m' : '/u'}`}
+                    </div>
                   </div>
+                  {sousTotal > 0 && (
+                    <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)', minWidth: 70, textAlign: 'right' }}>
+                      {fmtPrice(sousTotal)}
+                    </span>
+                  )}
                   <Badge color={complete ? 'green' : 'amber'}>{complete ? '✓ Complet' : 'En attente'}</Badge>
                 </div>
               );
             })}
           </div>
+
+          {/* Total commande */}
+          {(() => {
+            const total = (selected.commande_lignes || []).reduce((s, l) => s + l.qty_commandee * (l.prix_ht || 0), 0);
+            if (total === 0) return null;
+            return (
+              <div style={{ marginTop: 14, padding: '12px 16px', background: 'var(--green-light)', border: '1.5px solid #B0E5D0', borderRadius: 'var(--radius)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--green)' }}>💰 Coût total HT</span>
+                <span className="mono" style={{ fontWeight: 800, fontSize: 18, color: 'var(--green)' }}>{fmtPrice(total)}</span>
+              </div>
+            );
+          })()}
         </div>
       </Layout>
     );
@@ -240,7 +284,7 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   useEffect(() => { genNumeroCommande().then(setNumero); }, []);
   useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); }, [service, magasin, type]);
 
-  function addLigne(ref, nom) { if (lignes.some((l) => l.ref === ref)) return; setLignes((l) => [...l, { ref, nom, qty_commandee: 1 }]); }
+  function addLigne(ref, nom, prix_ht) { if (lignes.some((l) => l.ref === ref)) return; setLignes((l) => [...l, { ref, nom, prix_ht: prix_ht || 0, qty_commandee: 1 }]); }
   function setQty(ref, qty) { setLignes((l) => l.map((x) => (x.ref === ref ? { ...x, qty_commandee: Math.max(1, parseInt(qty) || 1) } : x))); }
   function removeLigne(ref) { setLignes((l) => l.filter((x) => x.ref !== ref)); }
 
@@ -275,17 +319,39 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
           <div style={{ marginBottom: 16 }}>
             <div style={fieldLabel}>Lignes ({lignes.length})</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {lignes.map((l) => (
-                <div key={l.ref} style={card}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{l.nom}</div>
-                    <div className="mono" style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>{l.ref}</div>
+              {lignes.map((l) => {
+                const sousTotal = l.qty_commandee * (l.prix_ht || 0);
+                return (
+                  <div key={l.ref} style={card}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{l.nom}</div>
+                      <div className="mono" style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
+                        {l.ref}{l.prix_ht > 0 && ` · ${fmtPrice(l.prix_ht)}${type === 'cable' ? '/m' : '/u'}`}
+                      </div>
+                    </div>
+                    <input type="number" min="1" value={l.qty_commandee} onChange={(e) => setQty(l.ref, e.target.value)} style={{ width: 70, padding: '8px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }} />
+                    {sousTotal > 0 && (
+                      <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--green)', minWidth: 70, textAlign: 'right' }}>
+                        {fmtPrice(sousTotal)}
+                      </span>
+                    )}
+                    <button onClick={() => removeLigne(l.ref)} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800 }}>×</button>
                   </div>
-                  <input type="number" min="1" value={l.qty_commandee} onChange={(e) => setQty(l.ref, e.target.value)} style={{ width: 70, padding: '8px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }} />
-                  <button onClick={() => removeLigne(l.ref)} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800 }}>×</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
+
+            {/* Total estimé */}
+            {(() => {
+              const total = lignes.reduce((s, l) => s + l.qty_commandee * (l.prix_ht || 0), 0);
+              if (total === 0) return null;
+              return (
+                <div style={{ marginTop: 10, padding: '12px 16px', background: 'var(--green-light)', border: '1.5px solid #B0E5D0', borderRadius: 'var(--radius)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--green)' }}>💰 Coût total estimé HT</span>
+                  <span className="mono" style={{ fontWeight: 800, fontSize: 18, color: 'var(--green)' }}>{fmtPrice(total)}</span>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -294,10 +360,12 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
           {notAdded.length === 0 ? <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600 }}>Tous les articles sont ajoutés (ou aucun dans ce périmètre).</p> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {notAdded.map((a) => (
-                <button key={a.ref} onClick={() => addLigne(a.ref, a.nom)} style={{ ...card, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: '100%' }}>
-                  <div style={{ flex: 1 }}>
+                <button key={a.ref} onClick={() => addLigne(a.ref, a.nom, a.prix_ht)} style={{ ...card, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: '100%' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nom}</div>
-                    <div className="mono" style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>{a.ref}</div>
+                    <div className="mono" style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
+                      {a.ref}{a.prix_ht > 0 && ` · ${fmtPrice(a.prix_ht)}${type === 'cable' ? '/m' : '/u'}`}
+                    </div>
                   </div>
                   <span style={{ color: 'var(--orange)', fontWeight: 800 }}>+ Ajouter</span>
                 </button>
