@@ -196,8 +196,21 @@ export async function parseFile(file) {
 export async function importConsos({ items, service, magasin }) {
   if (!items || items.length === 0) return { ok: false, error: 'Aucun article à importer' };
 
+  // 0. Dédupliquer les items dans le fichier lui-même (garder la première occurrence)
+  const seenRefs = new Set();
+  const dedupedItems = [];
+  const dupesInFile = [];
+  for (const it of items) {
+    if (seenRefs.has(it.ref)) {
+      dupesInFile.push(it.ref);
+    } else {
+      seenRefs.add(it.ref);
+      dedupedItems.push(it);
+    }
+  }
+
   // 1. Récupérer toutes les refs existantes pour ce scope
-  const refsToCheck = items.map((i) => i.ref);
+  const refsToCheck = dedupedItems.map((i) => i.ref);
   const { data: existing, error: e1 } = await supabase
     .from('articles_conso')
     .select('ref')
@@ -211,8 +224,8 @@ export async function importConsos({ items, service, magasin }) {
 
   // 2. Filtrer ce qui est à insérer
   const toInsert = [];
-  const skipped = [];
-  for (const it of items) {
+  const skipped = [...dupesInFile]; // les doublons du fichier sont aussi des "skipped"
+  for (const it of dedupedItems) {
     if (existingRefs.has(it.ref)) {
       skipped.push(it.ref);
     } else {
@@ -237,7 +250,22 @@ export async function importConsos({ items, service, magasin }) {
     const batch = toInsert.slice(i, i + BATCH);
     const { error } = await supabase.from('articles_conso').insert(batch);
     if (error) {
-      insertErrors.push(`Batch ${i / BATCH + 1} : ${error.message}`);
+      // Si le batch entier échoue (souvent un conflit caché), insertion ligne par ligne pour identifier
+      let batchOk = 0;
+      for (const row of batch) {
+        const { error: rowErr } = await supabase.from('articles_conso').insert([row]);
+        if (rowErr) {
+          // Conflit silencieux : ajouter à skipped
+          if (rowErr.code === '23505' || rowErr.message?.includes('duplicate')) {
+            skipped.push(row.ref);
+          } else {
+            insertErrors.push(`${row.ref} : ${rowErr.message}`);
+          }
+        } else {
+          batchOk++;
+        }
+      }
+      inserted += batchOk;
     } else {
       inserted += batch.length;
     }
