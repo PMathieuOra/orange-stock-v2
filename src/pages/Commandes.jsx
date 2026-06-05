@@ -248,7 +248,7 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
 
   return (
     <Layout brandTitle="Réception" brandSub="Administration">
-      <div style={{ padding: '16px 20px' }}>
+      <div style={{ padding: '16px 20px', paddingBottom: 100 }}>
         <button onClick={onCancel} style={backBtn}>← Détail</button>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', margin: '12px 0 4px' }}>Réceptionner</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}><span className="mono">{commande.numero}</span> — saisissez les quantités reçues.</p>
@@ -265,9 +265,27 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
             </div>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Button variant="secondary" onClick={onCancel} style={{ flex: 1 }}>Annuler</Button>
-          <Button onClick={submit} disabled={saving} style={{ flex: 1 }}>{saving ? 'Enregistrement...' : 'Valider la réception'}</Button>
+      </div>
+
+      {/* Barre d'action sticky en bas */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'rgba(255,255,255,0.98)',
+          backdropFilter: 'blur(8px)',
+          borderTop: '1px solid var(--line)',
+          padding: '12px 20px',
+          paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
+          zIndex: 35,
+          boxShadow: '0 -4px 16px rgba(0,0,0,0.05)',
+        }}
+      >
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', gap: 10 }}>
+          <Button variant="secondary" onClick={onCancel} disabled={saving} style={{ flex: 1 }}>Annuler</Button>
+          <Button onClick={submit} disabled={saving} style={{ flex: 2 }}>{saving ? 'Enregistrement...' : 'Valider la réception'}</Button>
         </div>
       </div>
     </Layout>
@@ -281,7 +299,6 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   const [lignes, setLignes] = useState([]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { genNumeroCommande().then(setNumero); }, []);
   useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); }, [service, magasin, type]);
 
   function addLigne(ref, nom, prix_ht) { if (lignes.some((l) => l.ref === ref)) return; setLignes((l) => [...l, { ref, nom, prix_ht: prix_ht || 0, qty_commandee: 1 }]); }
@@ -289,22 +306,37 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   function removeLigne(ref) { setLignes((l) => l.filter((x) => x.ref !== ref)); }
 
   async function submit() {
+    if (!numero.trim()) return toast('Numéro de commande requis', 'error');
     if (!lignes.length) return toast('Ajoutez au moins une ligne', 'error');
     setSaving(true);
-    const res = await createCommande({ numero, type, service, magasin, lignes, userId });
+    const res = await createCommande({ numero: numero.trim(), type, service, magasin, lignes, userId });
     setSaving(false);
     if (res.ok) { toast(`✓ Commande ${numero} créée`, 'success'); onDone(); }
     else toast('Erreur : ' + res.error, 'error');
   }
 
   const notAdded = available.filter((a) => !lignes.some((l) => l.ref === a.ref));
+  const totalEstime = lignes.reduce((s, l) => s + l.qty_commandee * (l.prix_ht || 0), 0);
+  const canSubmit = numero.trim() && lignes.length > 0 && !saving;
 
   return (
     <Layout brandTitle="Nouvelle commande" brandSub="Administration">
-      <div style={{ padding: '16px 20px' }}>
+      <div style={{ padding: '16px 20px', paddingBottom: 120 }}>
         <button onClick={onCancel} style={backBtn}>← Commandes</button>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', margin: '12px 0 4px' }}>Nouvelle commande</h1>
-        <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}><span className="mono">{numero || '...'}</span> · {getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}</p>
+        <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>{getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}</p>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={fieldLabel}>Numéro de commande <span style={{ color: 'var(--red)' }}>*</span></div>
+          <input
+            value={numero}
+            onChange={(e) => setNumero(e.target.value)}
+            placeholder="Ex: FM2600045"
+            autoFocus
+            className="mono"
+            style={{ width: '100%', padding: 12, border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', background: 'white', fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 700, color: 'var(--ink)', outline: 'none', letterSpacing: '0.02em' }}
+          />
+        </div>
 
         <div style={{ marginBottom: 16 }}>
           <div style={fieldLabel}>Type de commande</div>
@@ -373,10 +405,40 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
             </div>
           )}
         </div>
+      </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Button variant="secondary" onClick={onCancel} style={{ flex: 1 }}>Annuler</Button>
-          <Button onClick={submit} disabled={saving || !lignes.length} style={{ flex: 1 }}>{saving ? 'Création...' : 'Créer la commande'}</Button>
+      {/* Barre d'action sticky en bas */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'rgba(255,255,255,0.98)',
+          backdropFilter: 'blur(8px)',
+          borderTop: '1px solid var(--line)',
+          padding: '12px 20px',
+          paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
+          zIndex: 35,
+          boxShadow: '0 -4px 16px rgba(0,0,0,0.05)',
+        }}
+      >
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Indicateur synthétique */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {lignes.length === 0 ? 'Aucune ligne' : `${lignes.length} ligne${lignes.length > 1 ? 's' : ''}`}
+            </div>
+            {totalEstime > 0 && (
+              <div className="mono" style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)', lineHeight: 1.1 }}>
+                {fmtPrice(totalEstime)}
+              </div>
+            )}
+          </div>
+          <Button variant="secondary" onClick={onCancel} disabled={saving}>Annuler</Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {saving ? 'Création...' : 'Créer la commande'}
+          </Button>
         </div>
       </div>
     </Layout>

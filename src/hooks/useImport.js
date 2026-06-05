@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 
-// ===== TEMPLATE =====
+// ===== TEMPLATE CONSO =====
 
 const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty', 'prix_ht'];
 const TEMPLATE_EXAMPLES = [
@@ -10,8 +10,18 @@ const TEMPLATE_EXAMPLES = [
   ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4, 8.20],
 ];
 
-// Génère un fichier Excel modèle et déclenche le téléchargement
-export function downloadTemplate(format = 'xlsx') {
+// ===== TEMPLATE CABLES =====
+
+const CABLE_TEMPLATE_HEADERS = ['ref_touret', 'ref_type', 'nom_type', 'categorie', 'longueur', 'seuil', 'prix_ht'];
+const CABLE_TEMPLATE_EXAMPLES = [
+  ['TR-2024-001', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 1000, 200, 1.20],
+  ['TR-2024-002', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 850, 200, 1.20],
+  ['TR-2024-003', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 1000, 200, 1.20],
+  ['TR-CU-101', 'CU-4P-CAT6', 'Câble cuivre 4 paires Cat6', 'cuivre', 305, 100, 0.45],
+];
+
+// Génère un fichier Excel modèle pour les conso et déclenche le téléchargement
+export function downloadConsoTemplate(format = 'xlsx') {
   if (format === 'csv') {
     const csv = [
       TEMPLATE_HEADERS.join(','),
@@ -24,7 +34,6 @@ export function downloadTemplate(format = 'xlsx') {
 
   // Excel
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLES]);
-  // Largeurs de colonnes
   ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Consommables');
@@ -52,6 +61,58 @@ export function downloadTemplate(format = 'xlsx') {
   const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   triggerDownload(blob, 'modele-import-conso.xlsx');
+}
+
+// Alias pour rétro-compat (le code existant utilise downloadTemplate)
+export const downloadTemplate = downloadConsoTemplate;
+
+// Génère un fichier Excel modèle pour les câbles + tourets
+export function downloadCableTemplate(format = 'xlsx') {
+  if (format === 'csv') {
+    const csv = [
+      CABLE_TEMPLATE_HEADERS.join(','),
+      ...CABLE_TEMPLATE_EXAMPLES.map((row) => row.map((v) => `"${v}"`).join(',')),
+    ].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    triggerDownload(blob, 'modele-import-cables.csv');
+    return;
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet([CABLE_TEMPLATE_HEADERS, ...CABLE_TEMPLATE_EXAMPLES]);
+  ws['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 35 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Tourets');
+
+  // Feuille d'aide
+  const help = XLSX.utils.aoa_to_sheet([
+    ['MODE D\'EMPLOI — Import câbles & tourets'],
+    [],
+    ['1 ligne = 1 touret. Le type de câble est déduit automatiquement.'],
+    ['Si le même `ref_type` apparaît sur plusieurs lignes (ex: 3 tourets d\'un même câble),'],
+    ['le type est créé une seule fois et les tourets lui sont rattachés.'],
+    [],
+    ['Colonne', 'Description', 'Obligatoire'],
+    ['ref_touret', 'Référence unique du touret (ex: TR-2024-001)', 'Oui'],
+    ['ref_type', 'Référence unique du type de câble (ex: L1016-12FO)', 'Oui'],
+    ['nom_type', 'Nom complet du type de câble', 'Oui'],
+    ['categorie', '"fibre" ou "cuivre" uniquement', 'Oui'],
+    ['longueur', 'Longueur initiale du touret en mètres', 'Oui'],
+    ['seuil', 'Seuil d\'alerte du type de câble en mètres (somme des tourets)', 'Non (0)'],
+    ['prix_ht', 'Prix au mètre HT en euros (ex: 1.20)', 'Non (0)'],
+    [],
+    ['Conseils :'],
+    ['- Les tourets avec une ref_touret déjà existante seront ignorés'],
+    ['- Si le type de câble existe déjà, seuls les nouveaux tourets seront ajoutés'],
+    ['- Le service et le magasin sont définis par les pastilles dans l\'app'],
+    ['- Pour les valeurs décimales (prix), utilisez le point (1.20 et non 1,20)'],
+    ['- Si la catégorie est mal saisie, la ligne sera ignorée'],
+  ]);
+  help['!cols'] = [{ wch: 14 }, { wch: 60 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, help, 'Aide');
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  triggerDownload(blob, 'modele-import-cables.xlsx');
 }
 
 function triggerDownload(blob, filename) {
@@ -274,6 +335,283 @@ export async function importConsos({ items, service, magasin }) {
   return {
     ok: true,
     inserted,
+    skipped,
+    insertErrors,
+    total: items.length,
+  };
+}
+
+// ===== PARSING CABLES =====
+
+// Lit un fichier Excel ou CSV pour les câbles et renvoie un tableau de tourets
+export async function parseCableFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const isCSV = ext === 'csv';
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, {
+      type: 'array',
+      cellDates: false,
+      ...(isCSV ? { raw: true } : {}),
+    });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', header: 1 });
+
+    if (rows.length === 0) {
+      return { ok: false, error: 'Fichier vide' };
+    }
+
+    // Détecter la ligne d'entête (insensible casse/accents/espaces)
+    const normalize = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').trim();
+
+    const COL_ALIASES = {
+      ref_touret: ['ref_touret', 'reftouret', 'reftouret', 'touret', 'reftour', 'numerotouret', 'numtouret', 'ntouret'],
+      ref_type: ['ref_type', 'reftype', 'reftype', 'refcable', 'ref_cable', 'codecable', 'codetype', 'code'],
+      nom_type: ['nom_type', 'nomtype', 'nomcable', 'nom_cable', 'designation', 'libelle', 'nom'],
+      categorie: ['categorie', 'category', 'cat', 'type'],
+      longueur: ['longueur', 'longinitial', 'longueurinitiale', 'initiale', 'length', 'metre', 'metres', 'm'],
+      seuil: ['seuil', 'seuilalerte', 'alerte', 'min', 'minimum'],
+      prix_ht: ['prix_ht', 'prixht', 'prix', 'prixunitaire', 'prixmetre', 'tarif', 'pu', 'puht', 'cout'],
+    };
+
+    function findCol(row, aliases) {
+      for (let i = 0; i < row.length; i++) {
+        if (aliases.includes(normalize(row[i]))) return i;
+      }
+      return -1;
+    }
+
+    let headerIdx = -1;
+    let headerMap = null;
+    for (let i = 0; i < Math.min(5, rows.length); i++) {
+      const row = (rows[i] || []).map((c) => String(c).trim());
+      const refTouretIdx = findCol(row, COL_ALIASES.ref_touret);
+      const refTypeIdx = findCol(row, COL_ALIASES.ref_type);
+      if (refTouretIdx >= 0 && refTypeIdx >= 0) {
+        headerIdx = i;
+        headerMap = {
+          ref_touret: refTouretIdx,
+          ref_type: refTypeIdx,
+          nom_type: findCol(row, COL_ALIASES.nom_type),
+          categorie: findCol(row, COL_ALIASES.categorie),
+          longueur: findCol(row, COL_ALIASES.longueur),
+          seuil: findCol(row, COL_ALIASES.seuil),
+          prix_ht: findCol(row, COL_ALIASES.prix_ht),
+        };
+        break;
+      }
+    }
+
+    if (headerIdx === -1) {
+      return {
+        ok: false,
+        error: 'Entête introuvable. Le fichier doit contenir au minimum les colonnes : ref_touret, ref_type',
+      };
+    }
+
+    const items = [];
+    const errors = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const ref_touret = String(row[headerMap.ref_touret] ?? '').trim();
+      const ref_type = String(row[headerMap.ref_type] ?? '').trim();
+      const nom_type = String(row[headerMap.nom_type] ?? '').trim();
+      const categorieRaw = String(row[headerMap.categorie] ?? '').trim().toLowerCase();
+      const longueurRaw = headerMap.longueur >= 0 ? row[headerMap.longueur] : '';
+      const seuilRaw = headerMap.seuil >= 0 ? row[headerMap.seuil] : 0;
+      const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
+
+      // Ligne entièrement vide → skip silencieux
+      if (!ref_touret && !ref_type) continue;
+
+      // Validation
+      if (!ref_touret) {
+        errors.push(`Ligne ${i + 1} : ref_touret vide`);
+        continue;
+      }
+      if (!ref_type) {
+        errors.push(`Ligne ${i + 1} (${ref_touret}) : ref_type vide`);
+        continue;
+      }
+      if (!nom_type) {
+        errors.push(`Ligne ${i + 1} (${ref_touret}) : nom_type vide`);
+        continue;
+      }
+      // Catégorie
+      let categorie = null;
+      const catNorm = categorieRaw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (catNorm === 'fibre' || catNorm === 'fibres' || catNorm === 'fo') categorie = 'fibre';
+      else if (catNorm === 'cuivre' || catNorm === 'cu') categorie = 'cuivre';
+      else {
+        errors.push(`Ligne ${i + 1} (${ref_touret}) : catégorie invalide ("${categorieRaw}", attendu : fibre ou cuivre)`);
+        continue;
+      }
+      // Longueur
+      const longueur = parseInt(longueurRaw);
+      if (isNaN(longueur) || longueur <= 0) {
+        errors.push(`Ligne ${i + 1} (${ref_touret}) : longueur invalide`);
+        continue;
+      }
+      // Seuil
+      let seuil = 0;
+      if (seuilRaw !== '' && seuilRaw !== null && seuilRaw !== undefined) {
+        seuil = parseInt(seuilRaw);
+        if (isNaN(seuil) || seuil < 0) seuil = 0;
+      }
+      // Prix
+      let prix_ht = 0;
+      if (prixRaw !== '' && prixRaw !== null && prixRaw !== undefined) {
+        const prixStr = String(prixRaw).replace(',', '.').replace(/[^\d.-]/g, '');
+        const p = parseFloat(prixStr);
+        if (!isNaN(p) && p >= 0) prix_ht = p;
+      }
+
+      items.push({ ref_touret, ref_type, nom_type, categorie, longueur, seuil, prix_ht });
+    }
+
+    return { ok: true, items, errors };
+  } catch (e) {
+    return { ok: false, error: 'Erreur de lecture du fichier : ' + e.message };
+  }
+}
+
+// ===== IMPORT CABLES =====
+
+// Importe les câbles + tourets dans la base
+// 1. Pour chaque ref_type unique : créer le type_cable s'il n'existe pas
+// 2. Pour chaque ref_touret : créer le touret s'il n'existe pas
+export async function importCables({ items, service, magasin }) {
+  if (!items || items.length === 0) return { ok: false, error: 'Aucun touret à importer' };
+
+  // 0. Dédupliquer les ref_touret dans le fichier (garder la 1ère)
+  const seenTourets = new Set();
+  const dedupedItems = [];
+  const dupesInFile = [];
+  for (const it of items) {
+    if (seenTourets.has(it.ref_touret)) {
+      dupesInFile.push(it.ref_touret);
+    } else {
+      seenTourets.add(it.ref_touret);
+      dedupedItems.push(it);
+    }
+  }
+
+  // 1. Identifier les types de câbles uniques (par ref_type)
+  const typesByRef = {};
+  for (const it of dedupedItems) {
+    if (!typesByRef[it.ref_type]) {
+      typesByRef[it.ref_type] = {
+        ref_type: it.ref_type,
+        nom: it.nom_type,
+        categorie: it.categorie,
+        seuil: it.seuil,
+        prix_ht: it.prix_ht,
+      };
+    }
+  }
+  const uniqueTypeRefs = Object.keys(typesByRef);
+
+  // 2. Récupérer les types de câbles existants pour ce scope
+  const { data: existingTypes, error: e1 } = await supabase
+    .from('types_cable')
+    .select('id, ref_type')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .in('ref_type', uniqueTypeRefs);
+
+  if (e1) return { ok: false, error: 'Erreur lecture types câble : ' + e1.message };
+
+  const typeIdByRef = {};
+  (existingTypes || []).forEach((t) => { typeIdByRef[t.ref_type] = t.id; });
+
+  // 3. Créer les types manquants
+  const typesToCreate = uniqueTypeRefs
+    .filter((ref) => !typeIdByRef[ref])
+    .map((ref) => ({
+      ref_type: ref,
+      nom: typesByRef[ref].nom,
+      categorie: typesByRef[ref].categorie,
+      seuil: typesByRef[ref].seuil,
+      prix_ht: typesByRef[ref].prix_ht,
+      service_id: service,
+      magasin_id: magasin,
+      actif: true,
+    }));
+
+  let typesCreated = 0;
+  if (typesToCreate.length > 0) {
+    const { data: created, error: e2 } = await supabase
+      .from('types_cable')
+      .insert(typesToCreate)
+      .select('id, ref_type');
+    if (e2) return { ok: false, error: 'Erreur création types câble : ' + e2.message };
+    (created || []).forEach((t) => { typeIdByRef[t.ref_type] = t.id; });
+    typesCreated = created?.length || 0;
+  }
+
+  // 4. Récupérer les tourets existants pour skip
+  const touretRefsToCheck = dedupedItems.map((i) => i.ref_touret);
+  const { data: existingTourets, error: e3 } = await supabase
+    .from('tourets')
+    .select('ref_touret')
+    .in('ref_touret', touretRefsToCheck);
+
+  if (e3) return { ok: false, error: 'Erreur lecture tourets : ' + e3.message };
+
+  const existingTouretRefs = new Set((existingTourets || []).map((t) => t.ref_touret));
+
+  // 5. Préparer les tourets à insérer
+  const touretsToInsert = [];
+  const skipped = [...dupesInFile];
+  for (const it of dedupedItems) {
+    if (existingTouretRefs.has(it.ref_touret)) {
+      skipped.push(it.ref_touret);
+    } else {
+      const typeCableId = typeIdByRef[it.ref_type];
+      if (!typeCableId) {
+        skipped.push(it.ref_touret);
+        continue;
+      }
+      touretsToInsert.push({
+        ref_touret: it.ref_touret,
+        type_cable_id: typeCableId,
+        initiale: it.longueur,
+        restante: it.longueur,
+      });
+    }
+  }
+
+  // 6. Insérer les tourets par batches
+  let touretsInserted = 0;
+  const insertErrors = [];
+  const BATCH = 100;
+  for (let i = 0; i < touretsToInsert.length; i += BATCH) {
+    const batch = touretsToInsert.slice(i, i + BATCH);
+    const { error } = await supabase.from('tourets').insert(batch);
+    if (error) {
+      // Fallback ligne par ligne
+      for (const row of batch) {
+        const { error: rowErr } = await supabase.from('tourets').insert([row]);
+        if (rowErr) {
+          if (rowErr.code === '23505' || rowErr.message?.includes('duplicate')) {
+            skipped.push(row.ref_touret);
+          } else {
+            insertErrors.push(`${row.ref_touret} : ${rowErr.message}`);
+          }
+        } else {
+          touretsInserted++;
+        }
+      }
+    } else {
+      touretsInserted += batch.length;
+    }
+  }
+
+  return {
+    ok: true,
+    typesCreated,
+    touretsInserted,
     skipped,
     insertErrors,
     total: items.length,

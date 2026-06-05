@@ -13,7 +13,7 @@ import {
   fetchCables, createCable, updateCable, toggleCableActif, deleteCable,
   fetchTouretsForCable, createTouret, updateTouretRestante, deleteTouret,
 } from '../hooks/useArticles';
-import { downloadTemplate, parseFile, importConsos } from '../hooks/useImport';
+import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables } from '../hooks/useImport';
 
 export default function Articles() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -125,11 +125,9 @@ export default function Articles() {
             <Button variant="secondary" onClick={() => setScopeModalOpen(true)}>
               👀 {isSessionScope ? 'Voir un autre périmètre' : 'Changer de périmètre'}
             </Button>
-            {tab === 'conso' && (
-              <Button variant="secondary" onClick={() => setImportModalOpen(true)}>
-                📥 Importer
-              </Button>
-            )}
+            <Button variant="secondary" onClick={() => setImportModalOpen(true)}>
+              📥 Importer
+            </Button>
             <Button onClick={() => { setForm({ mode: 'create', type: tab, data: null }); setView('form'); }}>
               + Nouveau
             </Button>
@@ -182,6 +180,7 @@ export default function Articles() {
 
         {importModalOpen && (
           <ImportModal
+            mode={tab}
             service={activeService}
             magasin={activeMagasin}
             onClose={() => setImportModalOpen(false)}
@@ -544,7 +543,7 @@ function Info({ label, value }) {
 }
 
 // ===== IMPORT MODAL =====
-function ImportModal({ service, magasin, onClose, onDone, toast }) {
+function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
   const [step, setStep] = useState('upload'); // upload | preview | result
   const [file, setFile] = useState(null);
   const [parsing, setParsing] = useState(false);
@@ -552,11 +551,14 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
   const [importing, setImporting] = useState(false);
   const [report, setReport] = useState(null);
 
+  const isCable = mode === 'cable';
+  const title = isCable ? '📥 Importer des câbles & tourets' : '📥 Importer des consommables';
+
   async function handleFile(f) {
     if (!f) return;
     setFile(f);
     setParsing(true);
-    const res = await parseFile(f);
+    const res = isCable ? await parseCableFile(f) : await parseFile(f);
     setParsing(false);
     if (!res.ok) {
       toast(res.error, 'error');
@@ -569,24 +571,29 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
 
   async function confirmImport() {
     setImporting(true);
-    const res = await importConsos({ items: parseResult.items, service, magasin });
+    const res = isCable
+      ? await importCables({ items: parseResult.items, service, magasin })
+      : await importConsos({ items: parseResult.items, service, magasin });
     setImporting(false);
     if (!res.ok) return toast(res.error, 'error');
     setReport(res);
     setStep('result');
-    if (res.inserted > 0) toast(`✓ ${res.inserted} article(s) importé(s)`, 'success');
+    if (isCable) {
+      const total = res.touretsInserted + res.typesCreated;
+      if (total > 0) toast(`✓ ${res.touretsInserted} touret(s) + ${res.typesCreated} type(s) créé(s)`, 'success');
+    } else {
+      if (res.inserted > 0) toast(`✓ ${res.inserted} article(s) importé(s)`, 'success');
+    }
   }
 
-  function finishImport() {
-    onDone();
-  }
+  function finishImport() { onDone(); }
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', padding: 24, width: '100%', maxWidth: 540, maxHeight: '90vh', overflow: 'auto' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', padding: 24, width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <div>
-            <h2 style={{ fontSize: 20, fontWeight: 800 }}>📥 Importer des consommables</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 800 }}>{title}</h2>
             <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
               {getServiceInfo(service).icon} {getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}
             </p>
@@ -596,30 +603,32 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
 
         {/* Bannière de scope */}
         <div style={{ padding: '10px 14px', background: 'var(--orange-light)', border: '1.5px dashed #FFD9B0', borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--orange-dark)', fontWeight: 600, marginBottom: 16, lineHeight: 1.5 }}>
-          ⚠️ Les articles seront créés dans le périmètre <strong>{getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}</strong>. Changez de pastilles avant d'importer si ce n'est pas le bon scope.
+          ⚠️ Les {isCable ? 'câbles' : 'articles'} seront créés dans le périmètre <strong>{getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}</strong>. Changez de pastilles avant d'importer si ce n'est pas le bon scope.
         </div>
 
         {step === 'upload' && (
           <>
-            {/* Étape 1 : Télécharger le modèle */}
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
                 Étape 1 — Téléchargez un modèle
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant="secondary" onClick={() => downloadTemplate('xlsx')} style={{ flex: 1 }}>
+                <Button variant="secondary" onClick={() => isCable ? downloadCableTemplate('xlsx') : downloadConsoTemplate('xlsx')} style={{ flex: 1 }}>
                   📊 Modèle Excel (.xlsx)
                 </Button>
-                <Button variant="secondary" onClick={() => downloadTemplate('csv')} style={{ flex: 1 }}>
+                <Button variant="secondary" onClick={() => isCable ? downloadCableTemplate('csv') : downloadConsoTemplate('csv')} style={{ flex: 1 }}>
                   📄 Modèle CSV
                 </Button>
               </div>
               <p style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8, fontWeight: 600 }}>
-                Le fichier contient 4 colonnes : <span className="mono">ref, nom, seuil, qty</span>. Une feuille d'aide explique tout.
+                {isCable ? (
+                  <>Le fichier contient les colonnes : <span className="mono">ref_touret, ref_type, nom_type, categorie, longueur, seuil, prix_ht</span>. Une feuille d'aide explique tout.</>
+                ) : (
+                  <>Le fichier contient 4 colonnes : <span className="mono">ref, nom, seuil, qty</span>. Une feuille d'aide explique tout.</>
+                )}
               </p>
             </div>
 
-            {/* Étape 2 : Charger le fichier */}
             <div>
               <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
                 Étape 2 — Chargez votre fichier rempli
@@ -641,7 +650,7 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
         {step === 'preview' && parseResult && (
           <>
             <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
-              Aperçu — {parseResult.items.length} article(s) détecté(s)
+              Aperçu — {parseResult.items.length} {isCable ? 'touret(s)' : 'article(s)'} détecté(s)
             </div>
 
             {parseResult.errors.length > 0 && (
@@ -654,25 +663,56 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
               </div>
             )}
 
+            {isCable && (
+              <div style={{ padding: '10px 14px', background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
+                ℹ️ {new Set(parseResult.items.map(i => i.ref_type)).size} type(s) de câble distinct(s) détecté(s).
+              </div>
+            )}
+
             <div style={{ maxHeight: 280, overflow: 'auto', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', marginBottom: 16 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ background: 'var(--bg)', position: 'sticky', top: 0 }}>
-                  <tr>
-                    <th style={th}>Réf</th>
-                    <th style={th}>Nom</th>
-                    <th style={{ ...th, textAlign: 'right' }}>Seuil</th>
-                    <th style={{ ...th, textAlign: 'right' }}>Qty</th>
-                    <th style={{ ...th, textAlign: 'right' }}>Prix HT</th>
-                  </tr>
+                  {isCable ? (
+                    <tr>
+                      <th style={th}>Touret</th>
+                      <th style={th}>Type</th>
+                      <th style={th}>Cat.</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Long.</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Prix/m</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th style={th}>Réf</th>
+                      <th style={th}>Nom</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Seuil</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Qty</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Prix HT</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody>
                   {parseResult.items.slice(0, 50).map((it, i) => (
                     <tr key={i} style={{ borderTop: '1px solid var(--line)' }}>
-                      <td style={{ ...td, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{it.ref}</td>
-                      <td style={td}>{it.nom}</td>
-                      <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.seuil}</td>
-                      <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.qty}</td>
-                      <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.prix_ht ? it.prix_ht.toFixed(2) + ' €' : '—'}</td>
+                      {isCable ? (
+                        <>
+                          <td style={{ ...td, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{it.ref_touret}</td>
+                          <td style={td}>
+                            <div style={{ fontWeight: 700 }}>{it.nom_type}</div>
+                            <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{it.ref_type}</div>
+                          </td>
+                          <td style={td}>{it.categorie === 'fibre' ? '🟢 Fibre' : '🟠 Cuivre'}</td>
+                          <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.longueur}m</td>
+                          <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.prix_ht ? it.prix_ht.toFixed(2) + ' €' : '—'}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ ...td, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{it.ref}</td>
+                          <td style={td}>{it.nom}</td>
+                          <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.seuil}</td>
+                          <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.qty}</td>
+                          <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.prix_ht ? it.prix_ht.toFixed(2) + ' €' : '—'}</td>
+                        </>
+                      )}
                     </tr>
                   ))}
                   {parseResult.items.length > 50 && (
@@ -689,7 +729,7 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
                 ← Choisir un autre fichier
               </Button>
               <Button onClick={confirmImport} disabled={importing || parseResult.items.length === 0} style={{ flex: 2 }}>
-                {importing ? 'Import en cours...' : `✓ Importer ${parseResult.items.length} article(s)`}
+                {importing ? 'Import en cours...' : `✓ Importer ${parseResult.items.length} ${isCable ? 'touret(s)' : 'article(s)'}`}
               </Button>
             </div>
           </>
@@ -707,10 +747,23 @@ function ImportModal({ service, magasin, onClose, onDone, toast }) {
                 <span style={{ fontWeight: 600 }}>📦 Lignes lues</span>
                 <span className="mono" style={{ fontWeight: 800 }}>{report.total}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--green)' }}>
-                <span style={{ fontWeight: 700 }}>✓ Articles créés</span>
-                <span className="mono" style={{ fontWeight: 800 }}>{report.inserted}</span>
-              </div>
+              {isCable ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--blue)' }}>
+                    <span style={{ fontWeight: 700 }}>🔌 Types de câbles créés</span>
+                    <span className="mono" style={{ fontWeight: 800 }}>{report.typesCreated}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--green)' }}>
+                    <span style={{ fontWeight: 700 }}>✓ Tourets créés</span>
+                    <span className="mono" style={{ fontWeight: 800 }}>{report.touretsInserted}</span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--green)' }}>
+                  <span style={{ fontWeight: 700 }}>✓ Articles créés</span>
+                  <span className="mono" style={{ fontWeight: 800 }}>{report.inserted}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', color: report.skipped.length ? 'var(--amber)' : 'var(--ink-4)' }}>
                 <span style={{ fontWeight: 700 }}>⏭️ Doublons ignorés</span>
                 <span className="mono" style={{ fontWeight: 800 }}>{report.skipped.length}</span>
