@@ -23,34 +23,37 @@ export default function Sortie() {
   // Sélecteur de touret (quand on clique sur un câble)
   const [touretPicker, setTouretPicker] = useState(null); // {item, tourets, loading}
 
-  // Normaliser la catégorie pour comparaisons robustes (au cas où l'ENUM aurait une casse différente)
+  // Normaliser la catégorie pour comparaisons robustes
   const norm = (s) => String(s || '').toLowerCase().trim();
+
+  // Helper : vrai si l'item correspond au filtre catégorie
+  function matchCategory(it, filter) {
+    if (filter === 'all') return true;
+    if (filter === 'conso') return it.type === 'conso';
+    if (filter === 'fibre') return it.type === 'cable' && norm(it.categorie) === 'fibre';
+    if (filter === 'cuivre') return it.type === 'cable' && norm(it.categorie) === 'cuivre';
+    return true;
+  }
 
   const filtered = useMemo(() => items.filter((it) => {
     if (!it.actif) return false;
     if (it.qty <= 0) return false;
-    const cat = norm(it.categorie);
-    if (catFilter === 'conso' && it.type !== 'conso') return false;
-    if (catFilter === 'fibre' && (it.type !== 'cable' || cat !== 'fibre')) return false;
-    if (catFilter === 'cuivre' && (it.type !== 'cable' || cat !== 'cuivre')) return false;
+    if (!matchCategory(it, catFilter)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (it.ref + ' ' + it.nom).toLowerCase().includes(q);
   }), [items, catFilter, search]);
 
-  // Compteurs pour les badges des filtres
-  const counts = useMemo(() => items.reduce(
-    (acc, it) => {
-      if (!it.actif || it.qty <= 0) return acc;
-      acc.all++;
-      const cat = norm(it.categorie);
-      if (it.type === 'conso') acc.conso++;
-      else if (it.type === 'cable' && cat === 'fibre') acc.fibre++;
-      else if (it.type === 'cable' && cat === 'cuivre') acc.cuivre++;
-      return acc;
-    },
-    { all: 0, conso: 0, fibre: 0, cuivre: 0 }
-  ), [items]);
+  // Compteurs : uniquement les articles actifs avec stock
+  const counts = useMemo(() => {
+    const dispo = items.filter((it) => it.actif && it.qty > 0);
+    return {
+      all: dispo.length,
+      conso: dispo.filter((it) => it.type === 'conso').length,
+      fibre: dispo.filter((it) => it.type === 'cable' && norm(it.categorie) === 'fibre').length,
+      cuivre: dispo.filter((it) => it.type === 'cable' && norm(it.categorie) === 'cuivre').length,
+    };
+  }, [items]);
 
   async function handleAddClick(item) {
     if (item.type === 'conso') {
