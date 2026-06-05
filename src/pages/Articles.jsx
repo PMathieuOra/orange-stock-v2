@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,6 +34,7 @@ export default function Articles() {
   const [detail, setDetail] = useState(null); // {type, item}
   const [form, setForm] = useState(null); // {mode: 'create'|'edit', type, data}
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   // Sync activeScope with session on mount and session change
   useEffect(() => {
@@ -107,11 +108,19 @@ export default function Articles() {
   }
 
   // ===== LIST VIEW =====
-  const items = tab === 'conso' ? consos : cables;
+  const itemsRaw = tab === 'conso' ? consos : cables;
+  const items = useMemo(() => {
+    if (!search.trim()) return itemsRaw;
+    const q = search.toLowerCase().trim();
+    return itemsRaw.filter((it) => {
+      const ref = tab === 'conso' ? (it.ref || '') : (it.ref_type || '');
+      return (ref + ' ' + (it.nom || '')).toLowerCase().includes(q);
+    });
+  }, [itemsRaw, search, tab]);
 
   return (
     <Layout brandTitle="Articles" brandSub="Administration">
-      <div style={{ padding: '16px 20px' }}>
+      <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
         <button onClick={() => navigate('/admin')} style={backBtn}>← Administration</button>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12, margin: '12px 0 4px' }}>
@@ -152,8 +161,25 @@ export default function Articles() {
           ))}
         </div>
 
-        {loading ? <PageLoader /> : items.length === 0 ? <Empty icon="📦" text="Aucun article" sub="Cliquez '+ Nouveau' pour en créer un." /> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Barre de recherche */}
+        <input
+          placeholder="🔍 Rechercher par référence ou nom..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 12 }}
+        />
+        {search && (
+          <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginBottom: 8 }}>
+            {items.length} résultat{items.length > 1 ? 's' : ''} sur {itemsRaw.length}
+          </div>
+        )}
+
+        {loading ? <PageLoader /> : items.length === 0 ? <Empty icon="📦" text={search ? 'Aucun résultat' : 'Aucun article'} sub={search ? "Essayez un autre terme." : "Cliquez '+ Nouveau' pour en créer un."} /> : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: 8,
+          }}>
             {items.map((a) => (
               <button key={a.id} onClick={() => { setDetail({ type: tab, item: a }); setView('detail'); }} style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit', opacity: a.actif ? 1 : 0.5 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -372,7 +398,7 @@ function TouretItem({ touret, onUpdate, toast }) {
         <>
           <div style={{ textAlign: 'right' }}>
             <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.restante} m</div>
-            <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>
+            {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
           </div>
           <button onClick={() => setEditing(true)} style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
           <button onClick={del} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
@@ -420,21 +446,23 @@ function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone
   const [saving, setSaving] = useState(false);
 
   async function submit() {
-    if (!ref.trim()) return toast('Référence requise', 'error');
+    // Référence : obligatoire pour les conso, optionnelle pour les câbles (EAN)
+    if (!isCable && !ref.trim()) return toast('Référence requise', 'error');
     if (!nom.trim()) return toast('Nom requis', 'error');
     setSaving(true);
 
     if (isEdit) {
       const fn = isCable ? updateCable : updateConso;
+      const refTrim = ref.trim();
       const payload = isCable
-        ? { nom, categorie, seuil, prix_ht: prixHt }
-        : { nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
+        ? { ref_type: refTrim, nom, categorie, seuil, prix_ht: prixHt }
+        : { ref: refTrim, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
       const res = await fn(data.id, payload);
       setSaving(false);
       if (res.ok) {
         const updatedData = isCable
-          ? { ...data, nom, categorie, seuil, prix_ht: prixHt }
-          : { ...data, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0 };
+          ? { ...data, ref_type: refTrim || null, nom, categorie, seuil, prix_ht: prixHt }
+          : { ...data, ref: refTrim, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0 };
         toast(`✓ ${nom} mis à jour`, 'success');
         onDone(updatedData);
       }
@@ -462,9 +490,9 @@ function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone
           {getServiceInfo(service).icon} {getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}
         </p>
 
-        <Field label="Référence" required>
-          <input value={ref} onChange={(e) => setRef(e.target.value)} disabled={isEdit} className="mono" style={input} placeholder={isCable ? 'L1016-12FO' : 'PRJ45-C6'} />
-          {isEdit && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>La référence ne peut pas être modifiée.</div>}
+        <Field label={isCable ? 'Référence (EAN)' : 'Référence'} required={!isCable}>
+          <input value={ref} onChange={(e) => setRef(e.target.value)} className="mono" style={input} placeholder={isCable ? 'EAN (optionnel)' : ''} />
+          {isCable && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>L'EAN sert à passer commande. Peut être ajouté plus tard.</div>}
         </Field>
 
         <Field label="Nom" required>

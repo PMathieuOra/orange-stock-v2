@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useSession } from '../contexts/SessionContext';
 
 // Hook : récupère le stock consolidé (conso + câbles) pour le scope actif
+// Pour les câbles, récupère aussi la liste des tourets (pour le diagramme)
 export function useStock() {
   const { service, magasin } = useSession();
   const [items, setItems] = useState([]);
@@ -13,14 +14,50 @@ export function useStock() {
     if (!service || !magasin) return;
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('v_stock_consolide')
-      .select('*')
-      .eq('service_id', service)
-      .eq('magasin_id', magasin)
-      .order('nom');
-    if (error) setError(error.message);
-    else setItems(data || []);
+
+    // Charger en parallèle : vue consolidée + tous les tourets du scope
+    const [stockRes, touretsRes] = await Promise.all([
+      supabase
+        .from('v_stock_consolide')
+        .select('*')
+        .eq('service_id', service)
+        .eq('magasin_id', magasin)
+        .order('nom'),
+      // On joint sur types_cable pour filtrer par service+magasin
+      supabase
+        .from('tourets')
+        .select('id, ref_touret, initiale, restante, type_cable_id, types_cable!inner(service_id, magasin_id, ref_type)')
+        .eq('types_cable.service_id', service)
+        .eq('types_cable.magasin_id', magasin),
+    ]);
+
+    if (stockRes.error) {
+      setError(stockRes.error.message);
+      setLoading(false);
+      return;
+    }
+
+    const stockItems = stockRes.data || [];
+    const touretsByCableId = {};
+    (touretsRes.data || []).forEach((t) => {
+      if (!touretsByCableId[t.type_cable_id]) touretsByCableId[t.type_cable_id] = [];
+      touretsByCableId[t.type_cable_id].push({
+        id: t.id,
+        ref_touret: t.ref_touret,
+        initiale: t.initiale,
+        restante: t.restante,
+      });
+    });
+
+    // Enrichir les câbles avec leurs tourets
+    const enriched = stockItems.map((it) => {
+      if (it.type === 'cable') {
+        return { ...it, tourets: touretsByCableId[it.id] || [] };
+      }
+      return it;
+    });
+
+    setItems(enriched);
     setLoading(false);
   }, [service, magasin]);
 

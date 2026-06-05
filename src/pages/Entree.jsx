@@ -76,7 +76,7 @@ export default function Entree() {
 
   return (
     <Layout brandTitle="Entrée" brandSub="Stock">
-      <div style={{ padding: '16px 20px' }}>
+      <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Retour de matériel</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>
           Réintégrez au stock le matériel non utilisé par le technicien.
@@ -114,7 +114,12 @@ export default function Entree() {
             sub={search ? 'Essayez un autre terme.' : 'Créez des articles depuis la page Admin → Articles.'}
           />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: cart.length > 0 ? 120 : 20 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: 8,
+            paddingBottom: cart.length > 0 ? 120 : 20,
+          }}>
             {filtered.map((it) => {
               const inCart = cart.find((c) => c.ref === it.ref);
               return (

@@ -30,8 +30,9 @@ export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateConso(id, { nom, seuil, prix_ht, qty, userId, oldQty }) {
+export async function updateConso(id, { ref, nom, seuil, prix_ht, qty, userId, oldQty }) {
   const updates = {};
+  if (ref !== undefined) updates.ref = ref;
   if (nom !== undefined) updates.nom = nom;
   if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
   if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
@@ -106,8 +107,9 @@ export async function createCable({ ref_type, nom, categorie, seuil, prix_ht, se
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateCable(id, { nom, categorie, seuil, prix_ht }) {
+export async function updateCable(id, { ref_type, nom, categorie, seuil, prix_ht }) {
   const updates = {};
+  if (ref_type !== undefined) updates.ref_type = ref_type || null;  // vide = null
   if (nom !== undefined) updates.nom = nom;
   if (categorie !== undefined) updates.categorie = categorie;
   if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;

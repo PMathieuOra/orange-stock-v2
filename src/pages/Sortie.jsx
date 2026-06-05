@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { useStock } from '../hooks/useStock';
 import { useToast } from '../contexts/ToastContext';
@@ -23,31 +23,34 @@ export default function Sortie() {
   // Sélecteur de touret (quand on clique sur un câble)
   const [touretPicker, setTouretPicker] = useState(null); // {item, tourets, loading}
 
-  const filtered = items.filter((it) => {
+  // Normaliser la catégorie pour comparaisons robustes (au cas où l'ENUM aurait une casse différente)
+  const norm = (s) => String(s || '').toLowerCase().trim();
+
+  const filtered = useMemo(() => items.filter((it) => {
     if (!it.actif) return false;
     if (it.qty <= 0) return false;
-    // Filtre catégorie
+    const cat = norm(it.categorie);
     if (catFilter === 'conso' && it.type !== 'conso') return false;
-    if (catFilter === 'fibre' && (it.type !== 'cable' || it.categorie !== 'fibre')) return false;
-    if (catFilter === 'cuivre' && (it.type !== 'cable' || it.categorie !== 'cuivre')) return false;
-    // Recherche texte
+    if (catFilter === 'fibre' && (it.type !== 'cable' || cat !== 'fibre')) return false;
+    if (catFilter === 'cuivre' && (it.type !== 'cable' || cat !== 'cuivre')) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (it.ref + ' ' + it.nom).toLowerCase().includes(q);
-  });
+  }), [items, catFilter, search]);
 
   // Compteurs pour les badges des filtres
-  const counts = items.reduce(
+  const counts = useMemo(() => items.reduce(
     (acc, it) => {
       if (!it.actif || it.qty <= 0) return acc;
       acc.all++;
+      const cat = norm(it.categorie);
       if (it.type === 'conso') acc.conso++;
-      else if (it.type === 'cable' && it.categorie === 'fibre') acc.fibre++;
-      else if (it.type === 'cable' && it.categorie === 'cuivre') acc.cuivre++;
+      else if (it.type === 'cable' && cat === 'fibre') acc.fibre++;
+      else if (it.type === 'cable' && cat === 'cuivre') acc.cuivre++;
       return acc;
     },
     { all: 0, conso: 0, fibre: 0, cuivre: 0 }
-  );
+  ), [items]);
 
   async function handleAddClick(item) {
     if (item.type === 'conso') {
@@ -157,7 +160,7 @@ export default function Sortie() {
 
   return (
     <Layout brandTitle="Sortie" brandSub="Stock">
-      <div style={{ padding: '16px 20px' }}>
+      <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Sortie de stock</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>
           Sélectionnez les articles à sortir.
@@ -217,7 +220,12 @@ export default function Sortie() {
         {loading ? <PageLoader /> : filtered.length === 0 ? (
           <Empty icon="🔍" text={search ? 'Aucun résultat' : 'Aucun article disponible'} sub={search ? 'Essayez un autre terme.' : 'Tous les articles sont en rupture ou désactivés.'} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: cart.length > 0 ? 120 : 20 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: 8,
+            paddingBottom: cart.length > 0 ? 120 : 20,
+          }}>
             {filtered.map((it) => {
               const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type);
               const inCartTotal = inCartLines.reduce((s, x) => s + x.qty, 0);
@@ -366,7 +374,7 @@ function TouretPicker({ item, tourets, loading, onClose, onAdd }) {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div className="mono" style={{ fontSize: 16, fontWeight: 800, color: isSelected ? 'var(--orange-dark)' : 'var(--ink)' }}>{t.restante}m</div>
-                        <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>
+                        {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
                       </div>
                     </button>
                   );
