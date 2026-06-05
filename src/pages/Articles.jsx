@@ -622,7 +622,7 @@ function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
               </div>
               <p style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8, fontWeight: 600 }}>
                 {isCable ? (
-                  <>Le fichier contient les colonnes : <span className="mono">ref_touret, ref_type, nom_type, categorie, longueur, seuil, prix_ht</span>. Une feuille d'aide explique tout.</>
+                  <>Le fichier contient : <span className="mono">ref_touret, nom_type, categorie, longueur</span> (obligatoires) + <span className="mono">ref_type, seuil, prix_ht</span> (optionnels). Une feuille d'aide explique tout.</>
                 ) : (
                   <>Le fichier contient 4 colonnes : <span className="mono">ref, nom, seuil, qty</span>. Une feuille d'aide explique tout.</>
                 )}
@@ -665,7 +665,7 @@ function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
 
             {isCable && (
               <div style={{ padding: '10px 14px', background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
-                ℹ️ {new Set(parseResult.items.map(i => i.ref_type)).size} type(s) de câble distinct(s) détecté(s).
+                ℹ️ {new Set(parseResult.items.map(i => `${i.nom_type}|||${i.categorie}`)).size} type(s) de câble distinct(s) détecté(s).
               </div>
             )}
 
@@ -698,7 +698,7 @@ function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
                           <td style={{ ...td, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{it.ref_touret}</td>
                           <td style={td}>
                             <div style={{ fontWeight: 700 }}>{it.nom_type}</div>
-                            <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{it.ref_type}</div>
+                            {it.ref_type && <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)' }}>EAN : {it.ref_type}</div>}
                           </td>
                           <td style={td}>{it.categorie === 'fibre' ? '🟢 Fibre' : '🟠 Cuivre'}</td>
                           <td style={{ ...td, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{it.longueur}m</td>
@@ -753,6 +753,12 @@ function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
                     <span style={{ fontWeight: 700 }}>🔌 Types de câbles créés</span>
                     <span className="mono" style={{ fontWeight: 800 }}>{report.typesCreated}</span>
                   </div>
+                  {report.typesUpdated > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--blue)' }}>
+                      <span style={{ fontWeight: 700 }}>📝 EAN ajoutés à des types existants</span>
+                      <span className="mono" style={{ fontWeight: 800 }}>{report.typesUpdated}</span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', color: 'var(--green)' }}>
                     <span style={{ fontWeight: 700 }}>✓ Tourets créés</span>
                     <span className="mono" style={{ fontWeight: 800 }}>{report.touretsInserted}</span>

@@ -298,8 +298,9 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   const [available, setAvailable] = useState([]);
   const [lignes, setLignes] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [catFilter, setCatFilter] = useState('all'); // 'all' | 'fibre' | 'cuivre' (mode câble uniquement)
 
-  useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); }, [service, magasin, type]);
+  useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); setCatFilter('all'); }, [service, magasin, type]);
 
   function addLigne(ref, nom, prix_ht) { if (lignes.some((l) => l.ref === ref)) return; setLignes((l) => [...l, { ref, nom, prix_ht: prix_ht || 0, qty_commandee: 1 }]); }
   function setQty(ref, qty) { setLignes((l) => l.map((x) => (x.ref === ref ? { ...x, qty_commandee: Math.max(1, parseInt(qty) || 1) } : x))); }
@@ -315,7 +316,16 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
     else toast('Erreur : ' + res.error, 'error');
   }
 
-  const notAdded = available.filter((a) => !lignes.some((l) => l.ref === a.ref));
+  const notAdded = available.filter((a) => {
+    if (lignes.some((l) => l.ref === a.ref)) return false;
+    if (type === 'cable' && catFilter !== 'all' && a.categorie !== catFilter) return false;
+    return true;
+  });
+  const catCounts = {
+    all: available.filter((a) => !lignes.some((l) => l.ref === a.ref)).length,
+    fibre: available.filter((a) => a.categorie === 'fibre' && !lignes.some((l) => l.ref === a.ref)).length,
+    cuivre: available.filter((a) => a.categorie === 'cuivre' && !lignes.some((l) => l.ref === a.ref)).length,
+  };
   const totalEstime = lignes.reduce((s, l) => s + l.qty_commandee * (l.prix_ht || 0), 0);
   const canSubmit = numero.trim() && lignes.length > 0 && !saving;
 
@@ -389,6 +399,46 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
 
         <div style={{ marginBottom: 16 }}>
           <div style={fieldLabel}>Ajouter un article</div>
+
+          {/* Filtre catégorie en mode câble */}
+          {type === 'cable' && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12, overflowX: 'auto' }} className="no-scrollbar">
+              {[
+                { id: 'all', label: 'Tous', count: catCounts.all, color: 'var(--ink)' },
+                { id: 'fibre', label: '🟢 Fibre', count: catCounts.fibre, color: 'var(--green)' },
+                { id: 'cuivre', label: '🟠 Cuivre', count: catCounts.cuivre, color: '#D97706' },
+              ].map((f) => {
+                const active = catFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setCatFilter(f.id)}
+                    style={{
+                      background: active ? f.color : 'white',
+                      color: active ? 'white' : 'var(--ink-3)',
+                      border: `1.5px solid ${active ? f.color : 'var(--line)'}`,
+                      borderRadius: '100px',
+                      padding: '7px 13px',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      fontFamily: 'inherit',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                    }}
+                  >
+                    {f.label}
+                    <span style={{ background: active ? 'rgba(255,255,255,0.25)' : 'var(--bg)', color: active ? 'white' : 'var(--ink-4)', padding: '1px 6px', borderRadius: '100px', fontSize: 10, fontWeight: 800 }}>
+                      {f.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {notAdded.length === 0 ? <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600 }}>Tous les articles sont ajoutés (ou aucun dans ce périmètre).</p> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {notAdded.map((a) => (

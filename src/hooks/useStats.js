@@ -132,14 +132,16 @@ export async function fetchTops({ service, magasin, period, limit = 5 }) {
     .lte('created_at', end);
 
   // Top articles : agrégés par ref
+  // value principal = nombre de sorties (1 mouvement = 1 sortie)
+  // qty totale = somme des quantités (pour info)
   const articlesMap = {};
   (mouvs || []).forEach((m) => {
-    if (!articlesMap[m.ref]) articlesMap[m.ref] = { ref: m.ref, nom: m.nom, qty: 0, occurrences: 0 };
-    articlesMap[m.ref].qty += Math.abs(m.qty);
-    articlesMap[m.ref].occurrences++;
+    if (!articlesMap[m.ref]) articlesMap[m.ref] = { ref: m.ref, nom: m.nom, sorties: 0, qtyTotale: 0 };
+    articlesMap[m.ref].sorties += 1;
+    articlesMap[m.ref].qtyTotale += Math.abs(m.qty);
   });
   const topArticles = Object.values(articlesMap)
-    .sort((a, b) => b.qty - a.qty)
+    .sort((a, b) => b.sorties - a.sorties)
     .slice(0, limit);
 
   // Top techniciens : agrégés par user_id
@@ -199,8 +201,9 @@ export async function fetchEvolution({ service, magasin, months = 12 }) {
     const key = m.created_at.slice(0, 7);
     const bucket = buckets.find((b) => b.key === key);
     if (!bucket) return;
-    if (m.type === 'sortie') bucket.sorties += Math.abs(m.qty);
-    else if (m.type === 'entree') bucket.entrees += m.qty;
+    // Compter le NOMBRE de mouvements (1 sortie de 200m = 1 mouvement, pas 200)
+    if (m.type === 'sortie') bucket.sorties += 1;
+    else if (m.type === 'entree') bucket.entrees += 1;
   });
 
   return buckets;

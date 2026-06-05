@@ -150,11 +150,11 @@ export default function Stats() {
                     items={tops.topArticles.map((a) => ({
                       key: a.ref,
                       label: a.nom,
-                      sub: a.ref,
-                      value: a.qty,
-                      suffix: 'u.',
+                      sub: `${a.ref} · ${a.qtyTotale} unité${a.qtyTotale > 1 ? 's' : ''} sorties`,
+                      value: a.sorties,
+                      suffix: a.sorties > 1 ? 'sorties' : 'sortie',
                     }))}
-                    maxValue={Math.max(...tops.topArticles.map((a) => a.qty), 1)}
+                    maxValue={Math.max(...tops.topArticles.map((a) => a.sorties), 1)}
                   />
                 </div>
               </>

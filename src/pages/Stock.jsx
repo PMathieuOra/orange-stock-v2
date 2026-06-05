@@ -5,22 +5,27 @@ import { PageLoader, Empty, Badge } from '../components/ui';
 
 export default function Stock() {
   const { items, loading, error } = useStock();
-  const [tab, setTab] = useState('all'); // 'all' | 'critical' | 'conso' | 'cable'
+  const [tab, setTab] = useState('all'); // 'all' | 'critical' | 'conso' | 'fibre' | 'cuivre'
 
   const filtered = items.filter((it) => {
     if (tab === 'critical') return it.est_critique && it.actif;
     if (tab === 'conso') return it.type === 'conso';
-    if (tab === 'cable') return it.type === 'cable';
+    if (tab === 'fibre') return it.type === 'cable' && it.categorie === 'fibre';
+    if (tab === 'cuivre') return it.type === 'cable' && it.categorie === 'cuivre';
     return true;
   });
 
   const criticalCount = items.filter((i) => i.est_critique && i.actif).length;
+  const consoCount = items.filter((i) => i.type === 'conso').length;
+  const fibreCount = items.filter((i) => i.type === 'cable' && i.categorie === 'fibre').length;
+  const cuivreCount = items.filter((i) => i.type === 'cable' && i.categorie === 'cuivre').length;
 
   const tabs = [
-    { id: 'all', label: 'Tous' },
-    { id: 'critical', label: `⚠ Critiques (${criticalCount})` },
-    { id: 'conso', label: '📦 Conso' },
-    { id: 'cable', label: '🔌 Câbles' },
+    { id: 'all', label: 'Tous', count: items.length, color: 'var(--ink)' },
+    { id: 'critical', label: '⚠ Critiques', count: criticalCount, color: 'var(--red)' },
+    { id: 'conso', label: '📦 Conso', count: consoCount, color: 'var(--orange)' },
+    { id: 'fibre', label: '🟢 Fibre', count: fibreCount, color: 'var(--green)' },
+    { id: 'cuivre', label: '🟠 Cuivre', count: cuivreCount, color: '#D97706' },
   ];
 
   return (
@@ -30,26 +35,40 @@ export default function Stock() {
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>État du stock par périmètre.</p>
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto' }} className="no-scrollbar">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                background: tab === t.id ? 'var(--ink)' : 'white',
-                color: tab === t.id ? 'white' : 'var(--ink-3)',
-                border: '1.5px solid ' + (tab === t.id ? 'var(--ink)' : 'var(--line)'),
-                borderRadius: '100px',
-                padding: '8px 14px',
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                fontFamily: 'inherit',
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+          {tabs.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  background: active ? t.color : 'white',
+                  color: active ? 'white' : 'var(--ink-3)',
+                  border: `1.5px solid ${active ? t.color : 'var(--line)'}`,
+                  borderRadius: '100px',
+                  padding: '8px 14px',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontFamily: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {t.label}
+                <span style={{
+                  background: active ? 'rgba(255,255,255,0.25)' : 'var(--bg)',
+                  color: active ? 'white' : 'var(--ink-4)',
+                  padding: '1px 7px',
+                  borderRadius: '100px',
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}>{t.count}</span>
+              </button>
+            );
+          })}
         </div>
 
         {error && (

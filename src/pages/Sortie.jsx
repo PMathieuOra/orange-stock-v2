@@ -18,6 +18,7 @@ export default function Sortie() {
   const [cartOpen, setCartOpen] = useState(false);
   const [note, setNote] = useState('');
   const [validating, setValidating] = useState(false);
+  const [catFilter, setCatFilter] = useState('all'); // 'all' | 'conso' | 'fibre' | 'cuivre'
 
   // Sélecteur de touret (quand on clique sur un câble)
   const [touretPicker, setTouretPicker] = useState(null); // {item, tourets, loading}
@@ -25,10 +26,28 @@ export default function Sortie() {
   const filtered = items.filter((it) => {
     if (!it.actif) return false;
     if (it.qty <= 0) return false;
+    // Filtre catégorie
+    if (catFilter === 'conso' && it.type !== 'conso') return false;
+    if (catFilter === 'fibre' && (it.type !== 'cable' || it.categorie !== 'fibre')) return false;
+    if (catFilter === 'cuivre' && (it.type !== 'cable' || it.categorie !== 'cuivre')) return false;
+    // Recherche texte
     if (!search) return true;
     const q = search.toLowerCase();
     return (it.ref + ' ' + it.nom).toLowerCase().includes(q);
   });
+
+  // Compteurs pour les badges des filtres
+  const counts = items.reduce(
+    (acc, it) => {
+      if (!it.actif || it.qty <= 0) return acc;
+      acc.all++;
+      if (it.type === 'conso') acc.conso++;
+      else if (it.type === 'cable' && it.categorie === 'fibre') acc.fibre++;
+      else if (it.type === 'cable' && it.categorie === 'cuivre') acc.cuivre++;
+      return acc;
+    },
+    { all: 0, conso: 0, fibre: 0, cuivre: 0 }
+  );
 
   async function handleAddClick(item) {
     if (item.type === 'conso') {
@@ -148,8 +167,46 @@ export default function Sortie() {
           placeholder="🔍 Rechercher un article..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 16 }}
+          style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 12 }}
         />
+
+        {/* Filtres par catégorie */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto' }} className="no-scrollbar">
+          {[
+            { id: 'all', label: 'Tous', count: counts.all, color: 'var(--ink)' },
+            { id: 'conso', label: '📦 Conso', count: counts.conso, color: 'var(--orange)' },
+            { id: 'fibre', label: '🟢 Fibre', count: counts.fibre, color: 'var(--green)' },
+            { id: 'cuivre', label: '🟠 Cuivre', count: counts.cuivre, color: '#D97706' },
+          ].map((f) => {
+            const active = catFilter === f.id;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setCatFilter(f.id)}
+                style={{
+                  background: active ? f.color : 'white',
+                  color: active ? 'white' : 'var(--ink-3)',
+                  border: `1.5px solid ${active ? f.color : 'var(--line)'}`,
+                  borderRadius: '100px',
+                  padding: '8px 14px',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontFamily: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {f.label}
+                <span style={{ background: active ? 'rgba(255,255,255,0.25)' : 'var(--bg)', color: active ? 'white' : 'var(--ink-4)', padding: '1px 7px', borderRadius: '100px', fontSize: 11, fontWeight: 800 }}>
+                  {f.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
         {error && (
           <div style={{ padding: 16, background: 'var(--red-light)', color: 'var(--red)', borderRadius: 'var(--radius)', fontWeight: 600, marginBottom: 16 }}>

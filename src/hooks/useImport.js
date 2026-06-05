@@ -12,12 +12,12 @@ const TEMPLATE_EXAMPLES = [
 
 // ===== TEMPLATE CABLES =====
 
-const CABLE_TEMPLATE_HEADERS = ['ref_touret', 'ref_type', 'nom_type', 'categorie', 'longueur', 'seuil', 'prix_ht'];
+const CABLE_TEMPLATE_HEADERS = ['ref_touret', 'nom_type', 'categorie', 'longueur', 'ref_type', 'seuil', 'prix_ht'];
 const CABLE_TEMPLATE_EXAMPLES = [
-  ['TR-2024-001', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 1000, 200, 1.20],
-  ['TR-2024-002', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 850, 200, 1.20],
-  ['TR-2024-003', 'L1016-12FO', 'Câble fibre 12FO L1016', 'fibre', 1000, 200, 1.20],
-  ['TR-CU-101', 'CU-4P-CAT6', 'Câble cuivre 4 paires Cat6', 'cuivre', 305, 100, 0.45],
+  ['AC-2024-001', 'L1041 12FO', 'fibre', 1000, '3760024112345', 500, 1.20],
+  ['AC-2024-002', 'L1041 12FO', 'fibre', 850, '', 500, 1.20],
+  ['AC-2024-003', 'L1041 12FO', 'fibre', 1000, '', 500, 1.20],
+  ['AC-CU-101', '88 56 6', 'cuivre', 305, '', 200, 0.45],
 ];
 
 // Génère un fichier Excel modèle pour les conso et déclenche le téléchargement
@@ -79,7 +79,7 @@ export function downloadCableTemplate(format = 'xlsx') {
   }
 
   const ws = XLSX.utils.aoa_to_sheet([CABLE_TEMPLATE_HEADERS, ...CABLE_TEMPLATE_EXAMPLES]);
-  ws['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 35 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }];
+  ws['!cols'] = [{ wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 8 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Tourets');
 
@@ -88,21 +88,22 @@ export function downloadCableTemplate(format = 'xlsx') {
     ['MODE D\'EMPLOI — Import câbles & tourets'],
     [],
     ['1 ligne = 1 touret. Le type de câble est déduit automatiquement.'],
-    ['Si le même `ref_type` apparaît sur plusieurs lignes (ex: 3 tourets d\'un même câble),'],
-    ['le type est créé une seule fois et les tourets lui sont rattachés.'],
+    ['Plusieurs tourets du même type (même nom_type + categorie) sont rattachés au même type.'],
+    ['L\'EAN (ref_type) est optionnel : si absent, vous pourrez l\'ajouter plus tard.'],
     [],
     ['Colonne', 'Description', 'Obligatoire'],
-    ['ref_touret', 'Référence unique du touret (ex: TR-2024-001)', 'Oui'],
-    ['ref_type', 'Référence unique du type de câble (ex: L1016-12FO)', 'Oui'],
-    ['nom_type', 'Nom complet du type de câble', 'Oui'],
+    ['ref_touret', 'Nom unique du touret physique (ex: AC-2024-001)', 'Oui'],
+    ['nom_type', 'Typologie du câble (ex: "L1041 12FO" ou "88 56 6")', 'Oui'],
     ['categorie', '"fibre" ou "cuivre" uniquement', 'Oui'],
     ['longueur', 'Longueur initiale du touret en mètres', 'Oui'],
+    ['ref_type', 'EAN du produit pour les commandes (peut être vide)', 'Non'],
     ['seuil', 'Seuil d\'alerte du type de câble en mètres (somme des tourets)', 'Non (0)'],
     ['prix_ht', 'Prix au mètre HT en euros (ex: 1.20)', 'Non (0)'],
     [],
     ['Conseils :'],
     ['- Les tourets avec une ref_touret déjà existante seront ignorés'],
-    ['- Si le type de câble existe déjà, seuls les nouveaux tourets seront ajoutés'],
+    ['- Si une typologie (nom_type + categorie) existe déjà, les tourets y sont rattachés'],
+    ['- L\'EAN peut être vide ; il pourra être renseigné plus tard dans la fiche article'],
     ['- Le service et le magasin sont définis par les pastilles dans l\'app'],
     ['- Pour les valeurs décimales (prix), utilisez le point (1.20 et non 1,20)'],
     ['- Si la catégorie est mal saisie, la ligne sera ignorée'],
@@ -387,13 +388,13 @@ export async function parseCableFile(file) {
     for (let i = 0; i < Math.min(5, rows.length); i++) {
       const row = (rows[i] || []).map((c) => String(c).trim());
       const refTouretIdx = findCol(row, COL_ALIASES.ref_touret);
-      const refTypeIdx = findCol(row, COL_ALIASES.ref_type);
-      if (refTouretIdx >= 0 && refTypeIdx >= 0) {
+      const nomTypeIdx = findCol(row, COL_ALIASES.nom_type);
+      if (refTouretIdx >= 0 && nomTypeIdx >= 0) {
         headerIdx = i;
         headerMap = {
           ref_touret: refTouretIdx,
-          ref_type: refTypeIdx,
-          nom_type: findCol(row, COL_ALIASES.nom_type),
+          ref_type: findCol(row, COL_ALIASES.ref_type), // -1 si absente = OK
+          nom_type: nomTypeIdx,
           categorie: findCol(row, COL_ALIASES.categorie),
           longueur: findCol(row, COL_ALIASES.longueur),
           seuil: findCol(row, COL_ALIASES.seuil),
@@ -406,7 +407,7 @@ export async function parseCableFile(file) {
     if (headerIdx === -1) {
       return {
         ok: false,
-        error: 'Entête introuvable. Le fichier doit contenir au minimum les colonnes : ref_touret, ref_type',
+        error: 'Entête introuvable. Le fichier doit contenir au minimum les colonnes : ref_touret, nom_type',
       };
     }
 
@@ -415,7 +416,7 @@ export async function parseCableFile(file) {
     for (let i = headerIdx + 1; i < rows.length; i++) {
       const row = rows[i] || [];
       const ref_touret = String(row[headerMap.ref_touret] ?? '').trim();
-      const ref_type = String(row[headerMap.ref_type] ?? '').trim();
+      const ref_type = headerMap.ref_type >= 0 ? String(row[headerMap.ref_type] ?? '').trim() : '';
       const nom_type = String(row[headerMap.nom_type] ?? '').trim();
       const categorieRaw = String(row[headerMap.categorie] ?? '').trim().toLowerCase();
       const longueurRaw = headerMap.longueur >= 0 ? row[headerMap.longueur] : '';
@@ -423,15 +424,11 @@ export async function parseCableFile(file) {
       const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
 
       // Ligne entièrement vide → skip silencieux
-      if (!ref_touret && !ref_type) continue;
+      if (!ref_touret && !nom_type) continue;
 
-      // Validation
+      // Validation : ref_touret + nom_type obligatoires
       if (!ref_touret) {
         errors.push(`Ligne ${i + 1} : ref_touret vide`);
-        continue;
-      }
-      if (!ref_type) {
-        errors.push(`Ligne ${i + 1} (${ref_touret}) : ref_type vide`);
         continue;
       }
       if (!nom_type) {
@@ -467,7 +464,10 @@ export async function parseCableFile(file) {
         if (!isNaN(p) && p >= 0) prix_ht = p;
       }
 
-      items.push({ ref_touret, ref_type, nom_type, categorie, longueur, seuil, prix_ht });
+      // ref_type: null si vide (pas de string vide en base)
+      const refTypeValue = ref_type || null;
+
+      items.push({ ref_touret, ref_type: refTypeValue, nom_type, categorie, longueur, seuil, prix_ht });
     }
 
     return { ok: true, items, errors };
@@ -497,57 +497,89 @@ export async function importCables({ items, service, magasin }) {
     }
   }
 
-  // 1. Identifier les types de câbles uniques (par ref_type)
-  const typesByRef = {};
+  // 1. Identifier les types de câbles uniques (clé : nom_type + categorie)
+  // L'EAN (ref_type) est ajouté au type uniquement si fourni au moins une fois
+  const typesByKey = {};
+  const typeKey = (nom, cat) => `${nom}|||${cat}`;
+
   for (const it of dedupedItems) {
-    if (!typesByRef[it.ref_type]) {
-      typesByRef[it.ref_type] = {
-        ref_type: it.ref_type,
+    const key = typeKey(it.nom_type, it.categorie);
+    if (!typesByKey[key]) {
+      typesByKey[key] = {
+        key,
         nom: it.nom_type,
         categorie: it.categorie,
+        ref_type: it.ref_type || null,
         seuil: it.seuil,
         prix_ht: it.prix_ht,
       };
+    } else if (it.ref_type && !typesByKey[key].ref_type) {
+      // Si une autre ligne du même type a renseigné l'EAN, on le prend
+      typesByKey[key].ref_type = it.ref_type;
     }
   }
-  const uniqueTypeRefs = Object.keys(typesByRef);
+  const uniqueKeys = Object.keys(typesByKey);
 
-  // 2. Récupérer les types de câbles existants pour ce scope
+  // 2. Récupérer les types existants dans ce scope
+  // Recherche par (nom, categorie) car ref_type peut être null
   const { data: existingTypes, error: e1 } = await supabase
     .from('types_cable')
-    .select('id, ref_type')
+    .select('id, ref_type, nom, categorie')
     .eq('service_id', service)
-    .eq('magasin_id', magasin)
-    .in('ref_type', uniqueTypeRefs);
+    .eq('magasin_id', magasin);
 
   if (e1) return { ok: false, error: 'Erreur lecture types câble : ' + e1.message };
 
-  const typeIdByRef = {};
-  (existingTypes || []).forEach((t) => { typeIdByRef[t.ref_type] = t.id; });
+  // Map des types existants par clé (nom|||categorie)
+  const typeIdByKey = {};
+  const existingByKey = {};
+  (existingTypes || []).forEach((t) => {
+    const key = typeKey(t.nom, t.categorie);
+    typeIdByKey[key] = t.id;
+    existingByKey[key] = t;
+  });
 
-  // 3. Créer les types manquants
-  const typesToCreate = uniqueTypeRefs
-    .filter((ref) => !typeIdByRef[ref])
-    .map((ref) => ({
-      ref_type: ref,
-      nom: typesByRef[ref].nom,
-      categorie: typesByRef[ref].categorie,
-      seuil: typesByRef[ref].seuil,
-      prix_ht: typesByRef[ref].prix_ht,
-      service_id: service,
-      magasin_id: magasin,
-      actif: true,
-    }));
+  // 3. Créer les types manquants (et mettre à jour ceux qui n'avaient pas d'EAN)
+  const typesToCreate = uniqueKeys
+    .filter((k) => !typeIdByKey[k])
+    .map((k) => {
+      const t = typesByKey[k];
+      return {
+        ref_type: t.ref_type,  // peut être null
+        nom: t.nom,
+        categorie: t.categorie,
+        seuil: t.seuil,
+        prix_ht: t.prix_ht,
+        service_id: service,
+        magasin_id: magasin,
+        actif: true,
+      };
+    });
 
   let typesCreated = 0;
   if (typesToCreate.length > 0) {
     const { data: created, error: e2 } = await supabase
       .from('types_cable')
       .insert(typesToCreate)
-      .select('id, ref_type');
+      .select('id, nom, categorie');
     if (e2) return { ok: false, error: 'Erreur création types câble : ' + e2.message };
-    (created || []).forEach((t) => { typeIdByRef[t.ref_type] = t.id; });
+    (created || []).forEach((t) => { typeIdByKey[typeKey(t.nom, t.categorie)] = t.id; });
     typesCreated = created?.length || 0;
+  }
+
+  // 3 bis. Mettre à jour les EAN manquants des types existants
+  // (si le fichier renseigne un EAN pour un type qui n'en avait pas)
+  let typesUpdated = 0;
+  for (const k of uniqueKeys) {
+    const existingType = existingByKey[k];
+    const fileType = typesByKey[k];
+    if (existingType && !existingType.ref_type && fileType.ref_type) {
+      await supabase
+        .from('types_cable')
+        .update({ ref_type: fileType.ref_type })
+        .eq('id', existingType.id);
+      typesUpdated++;
+    }
   }
 
   // 4. Récupérer les tourets existants pour skip
@@ -568,7 +600,7 @@ export async function importCables({ items, service, magasin }) {
     if (existingTouretRefs.has(it.ref_touret)) {
       skipped.push(it.ref_touret);
     } else {
-      const typeCableId = typeIdByRef[it.ref_type];
+      const typeCableId = typeIdByKey[typeKey(it.nom_type, it.categorie)];
       if (!typeCableId) {
         skipped.push(it.ref_touret);
         continue;
@@ -611,6 +643,7 @@ export async function importCables({ items, service, magasin }) {
   return {
     ok: true,
     typesCreated,
+    typesUpdated,
     touretsInserted,
     skipped,
     insertErrors,
