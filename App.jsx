@@ -1,109 +1,149 @@
+import bcrypt from 'bcryptjs';
 import { supabase } from '../lib/supabase';
 
-// Sortie de stock pour un panier
-// cart = [{ ref, nom, type, qty }]
-// Pour les conso : décrémente articles_conso.qty
-// Pour les câbles : décrémente les tourets (entamés en priorité, puis neufs)
-// Logue chaque mouvement dans mouvements
-export async function validateSortie({ cart, service, magasin, userId, note = '' }) {
-  if (!cart || cart.length === 0) return { ok: false, error: 'Panier vide' };
+// Génère l'identifiant via la fonction SQL
+export async function genIdentifiant(prenom, initiale) {
+  const { data, error } = await supabase.rpc('generer_identifiant', {
+    p_prenom: prenom,
+    p_initiale: initiale,
+  });
+  if (error) {
+    // Fallback côté client
+    const base = (prenom + '_' + initiale)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9_]/g, '');
+    return base;
+  }
+  return data;
+}
 
-  // 1. Vérification préalable : on a bien le stock pour tout
-  const checks = [];
-  for (const item of cart) {
-    if (item.type === 'conso') {
-      const { data: art, error } = await supabase
-        .from('articles_conso')
-        .select('id, qty, nom')
-        .eq('ref', item.ref)
-        .eq('service_id', service)
-        .eq('magasin_id', magasin)
-        .maybeSingle();
-      if (error) return { ok: false, error: 'Erreur lecture stock : ' + error.message };
-      if (!art) return { ok: false, error: `Article ${item.ref} introuvable` };
-      if (art.qty < item.qty) return { ok: false, error: `Stock insuffisant pour ${art.nom} (${art.qty} disponible, ${item.qty} demandé)` };
-      checks.push({ ...item, articleId: art.id, qtyDispo: art.qty });
-    } else {
-      // Câble : récupérer le type + ses tourets
-      const { data: tc, error: e1 } = await supabase
-        .from('types_cable')
-        .select('id, nom, tourets(id, ref_touret, initiale, restante)')
-        .eq('ref_type', item.ref)
-        .eq('service_id', service)
-        .eq('magasin_id', magasin)
-        .maybeSingle();
-      if (e1) return { ok: false, error: 'Erreur lecture câbles : ' + e1.message };
-      if (!tc) return { ok: false, error: `Câble ${item.ref} introuvable` };
-      const totalDispo = (tc.tourets || []).reduce((s, t) => s + t.restante, 0);
-      if (totalDispo < item.qty) return { ok: false, error: `Stock insuffisant pour ${tc.nom} (${totalDispo}m disponible, ${item.qty}m demandé)` };
-      checks.push({ ...item, typeCableId: tc.id, tourets: tc.tourets || [], qtyDispo: totalDispo });
+// Liste tous les users avec leurs services et magasins
+export async function fetchUsers() {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*, users_services(service_id), users_magasins(magasin_id)')
+    .order('prenom');
+  return { ok: !error, data: data || [], error: error?.message };
+}
+
+// Avatar colors disponibles (rotation pour les nouveaux users)
+const AVATAR_COLORS = ['c-orange', 'c-blue', 'c-green', 'c-purple', 'c-pink', 'c-teal', 'c-indigo', 'c-rose'];
+
+function pickAvatarColor(existingUsers) {
+  // Compter les usages de chaque couleur
+  const counts = {};
+  AVATAR_COLORS.forEach((c) => (counts[c] = 0));
+  existingUsers.forEach((u) => {
+    if (counts[u.avatar_couleur] !== undefined) counts[u.avatar_couleur]++;
+  });
+  // Prendre la moins utilisée
+  let minColor = AVATAR_COLORS[0];
+  let minCount = counts[minColor];
+  AVATAR_COLORS.forEach((c) => {
+    if (counts[c] < minCount) {
+      minCount = counts[c];
+      minColor = c;
+    }
+  });
+  return minColor;
+}
+
+// Crée un utilisateur
+export async function createUser({ prenom, initiale, role, services, magasins, allUsers = [] }) {
+  if (!prenom || !prenom.trim()) return { ok: false, error: 'Prénom requis' };
+  if (!initiale || !initiale.trim()) return { ok: false, error: 'Initiale du nom requise' };
+  if (!services || !services.length) return { ok: false, error: 'Au moins un service requis' };
+  if (!magasins || !magasins.length) return { ok: false, error: 'Au moins un magasin requis' };
+
+  const identifiant = await genIdentifiant(prenom.trim(), initiale.trim());
+  if (!identifiant) return { ok: false, error: 'Impossible de générer un identifiant' };
+
+  // Hash du MDP initial "0000"
+  const passwordHash = bcrypt.hashSync('0000', 10);
+  const avatarColor = pickAvatarColor(allUsers);
+
+  const { data: user, error } = await supabase
+    .from('users')
+    .insert({
+      identifiant,
+      prenom: prenom.trim(),
+      nom_initiale: initiale.trim().toUpperCase(),
+      password_hash: passwordHash,
+      role: role || 'user',
+      must_change_pwd: true,
+      actif: true,
+      avatar_couleur: avatarColor,
+    })
+    .select()
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  // Liaisons services
+  if (services.length > 0) {
+    const svcLinks = services.map((s) => ({ user_id: user.id, service_id: s }));
+    await supabase.from('users_services').insert(svcLinks);
+  }
+  // Liaisons magasins
+  if (magasins.length > 0) {
+    const magLinks = magasins.map((m) => ({ user_id: user.id, magasin_id: m }));
+    await supabase.from('users_magasins').insert(magLinks);
+  }
+
+  return { ok: true, user, identifiant };
+}
+
+// Met à jour un utilisateur (sauf identifiant et password)
+export async function updateUser(userId, { prenom, initiale, role, services, magasins }) {
+  const updates = {};
+  if (prenom !== undefined) updates.prenom = prenom.trim();
+  if (initiale !== undefined) updates.nom_initiale = initiale.trim().toUpperCase();
+  if (role !== undefined) updates.role = role;
+
+  if (Object.keys(updates).length) {
+    const { error } = await supabase.from('users').update(updates).eq('id', userId);
+    if (error) return { ok: false, error: error.message };
+  }
+
+  // Liaisons services : remplacer en totalité
+  if (services !== undefined) {
+    await supabase.from('users_services').delete().eq('user_id', userId);
+    if (services.length) {
+      const links = services.map((s) => ({ user_id: userId, service_id: s }));
+      await supabase.from('users_services').insert(links);
+    }
+  }
+  // Liaisons magasins : idem
+  if (magasins !== undefined) {
+    await supabase.from('users_magasins').delete().eq('user_id', userId);
+    if (magasins.length) {
+      const links = magasins.map((m) => ({ user_id: userId, magasin_id: m }));
+      await supabase.from('users_magasins').insert(links);
     }
   }
 
-  // 2. Application : décrémenter le stock + logger
-  const mouvementsToLog = [];
-  for (const item of checks) {
-    if (item.type === 'conso') {
-      const nouvelleQty = item.qtyDispo - item.qty;
-      const { error } = await supabase.from('articles_conso').update({ qty: nouvelleQty }).eq('id', item.articleId);
-      if (error) return { ok: false, error: 'Erreur mise à jour stock : ' + error.message };
-      mouvementsToLog.push({
-        type: 'sortie',
-        service_id: service,
-        magasin_id: magasin,
-        ref: item.ref,
-        nom: item.nom,
-        qty: -item.qty,
-        user_id: userId,
-        note,
-      });
-    } else {
-      // Câble : décrémenter les tourets dans l'ordre : entamés (restante > 0 et < initiale) d'abord, puis neufs
-      let reste = item.qty;
-      const sortedTourets = [...item.tourets].sort((a, b) => {
-        const aEntame = a.restante > 0 && a.restante < a.initiale;
-        const bEntame = b.restante > 0 && b.restante < b.initiale;
-        if (aEntame && !bEntame) return -1;
-        if (!aEntame && bEntame) return 1;
-        // Sinon, plus petit restant d'abord (vider les bobines presque finies)
-        return a.restante - b.restante;
-      });
+  return { ok: true };
+}
 
-      const touretUpdates = [];
-      for (const t of sortedTourets) {
-        if (reste <= 0) break;
-        if (t.restante <= 0) continue;
-        const prise = Math.min(t.restante, reste);
-        touretUpdates.push({ id: t.id, ref_touret: t.ref_touret, nouvelleRestante: t.restante - prise, prise });
-        reste -= prise;
-      }
-      // Appliquer
-      for (const u of touretUpdates) {
-        const { error } = await supabase.from('tourets').update({ restante: u.nouvelleRestante }).eq('id', u.id);
-        if (error) return { ok: false, error: 'Erreur touret : ' + error.message };
-      }
-      // Note enrichie : liste des tourets utilisés
-      const noteEnrichie = note
-        ? `${note} | Tourets : ${touretUpdates.map((u) => `${u.ref_touret}(-${u.prise}m)`).join(', ')}`
-        : `Tourets : ${touretUpdates.map((u) => `${u.ref_touret}(-${u.prise}m)`).join(', ')}`;
-      mouvementsToLog.push({
-        type: 'sortie',
-        service_id: service,
-        magasin_id: magasin,
-        ref: item.ref,
-        nom: item.nom,
-        qty: -item.qty,
-        user_id: userId,
-        note: noteEnrichie,
-      });
-    }
-  }
+// Active/désactive un utilisateur
+export async function toggleUserActif(userId, actif) {
+  const { error } = await supabase.from('users').update({ actif }).eq('id', userId);
+  return { ok: !error, error: error?.message };
+}
 
-  // 3. Logger tous les mouvements d'un coup
-  if (mouvementsToLog.length) {
-    const { error } = await supabase.from('mouvements').insert(mouvementsToLog);
-    if (error) return { ok: false, error: 'Erreur log mouvements : ' + error.message };
-  }
+// Réinitialise le mot de passe à "0000" et force le changement
+export async function resetPassword(userId) {
+  const hash = bcrypt.hashSync('0000', 10);
+  const { error } = await supabase
+    .from('users')
+    .update({ password_hash: hash, must_change_pwd: true })
+    .eq('id', userId);
+  return { ok: !error, error: error?.message };
+}
 
-  return { ok: true, nbMouvements: mouvementsToLog.length };
+// Supprime un utilisateur (cascade sur users_services et users_magasins)
+export async function deleteUser(userId) {
+  const { error } = await supabase.from('users').delete().eq('id', userId);
+  return { ok: !error, error: error?.message };
 }

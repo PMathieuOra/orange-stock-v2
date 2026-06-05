@@ -1,119 +1,164 @@
 import { supabase } from '../lib/supabase';
 
-// Liste tous les magasins avec leurs services
-export async function fetchMagasins() {
+// ===== ARTICLES CONSO =====
+
+export async function fetchConsos(service, magasin) {
   const { data, error } = await supabase
-    .from('magasins')
-    .select('*, magasins_services(service_id)')
+    .from('articles_conso')
+    .select('*')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
     .order('nom');
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-// Stats d'un magasin (nb users, articles, commandes)
-export async function fetchMagasinStats(magasinId) {
-  const [users, conso, cables, commandes, tourets] = await Promise.all([
-    supabase.from('users_magasins').select('user_id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('articles_conso').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('types_cable').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('commandes').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    // Tourets : à travers types_cable
-    supabase.from('types_cable').select('id, tourets(id)').eq('magasin_id', magasinId),
-  ]);
-
-  const touretsCount = (tourets.data || []).reduce((sum, t) => sum + (t.tourets?.length || 0), 0);
-
-  return {
-    nbUsers: users.count || 0,
-    nbConso: conso.count || 0,
-    nbCables: cables.count || 0,
-    nbCommandes: commandes.count || 0,
-    nbTourets: touretsCount,
-  };
-}
-
-// Génère un slug d'id depuis le nom (ex : "Saint-Quentin" → "saint_quentin")
-export function slugify(nom) {
-  return nom
-    .toLowerCase()
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
-// Crée un magasin
-export async function createMagasin({ id, nom, services }) {
-  if (!id || !nom) return { ok: false, error: 'Identifiant et nom requis' };
-
-  const { data: magasin, error } = await supabase
-    .from('magasins')
-    .insert({ id, nom: nom.trim(), actif: true })
+export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }) {
+  const { data, error } = await supabase
+    .from('articles_conso')
+    .insert({
+      ref,
+      nom,
+      seuil: parseInt(seuil) || 0,
+      prix_ht: parseFloat(prix_ht) || 0,
+      qty: 0,
+      service_id: service,
+      magasin_id: magasin,
+      actif: true,
+    })
     .select()
     .single();
-  if (error) return { ok: false, error: error.message };
-
-  // Liaison services
-  if (services && services.length > 0) {
-    const links = services.map((s) => ({ magasin_id: id, service_id: s }));
-    const { error: linkErr } = await supabase.from('magasins_services').insert(links);
-    if (linkErr) return { ok: false, error: linkErr.message };
-  }
-
-  return { ok: true, magasin };
+  return { ok: !error, data, error: error?.message };
 }
 
-// Met à jour un magasin
-export async function updateMagasin(magasinId, { nom, services }) {
-  if (nom !== undefined) {
-    const { error } = await supabase
-      .from('magasins')
-      .update({ nom: nom.trim() })
-      .eq('id', magasinId);
-    if (error) return { ok: false, error: error.message };
-  }
+export async function updateConso(id, { ref, nom, seuil, prix_ht, qty, userId, oldQty }) {
+  const updates = {};
+  if (ref !== undefined) updates.ref = ref;
+  if (nom !== undefined) updates.nom = nom;
+  if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
+  if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  if (qty !== undefined) updates.qty = Math.max(0, parseInt(qty) || 0);
 
-  if (services !== undefined) {
-    await supabase.from('magasins_services').delete().eq('magasin_id', magasinId);
-    if (services.length) {
-      const links = services.map((s) => ({ magasin_id: magasinId, service_id: s }));
-      const { error } = await supabase.from('magasins_services').insert(links);
-      if (error) return { ok: false, error: error.message };
+  const { error } = await supabase.from('articles_conso').update(updates).eq('id', id);
+  if (error) return { ok: false, error: error.message };
+
+  // Si la quantité a changé, logguer un mouvement d'ajustement
+  if (qty !== undefined && oldQty !== undefined && updates.qty !== oldQty) {
+    const diff = updates.qty - oldQty;
+    // Récupérer les infos de l'article pour logguer correctement
+    const { data: article } = await supabase
+      .from('articles_conso')
+      .select('ref, nom, service_id, magasin_id')
+      .eq('id', id)
+      .single();
+    if (article) {
+      await supabase.from('mouvements').insert({
+        type: 'ajustement',
+        service_id: article.service_id,
+        magasin_id: article.magasin_id,
+        ref: article.ref,
+        nom: article.nom,
+        qty: diff,
+        user_id: userId || null,
+        note: `Ajustement manuel : ${oldQty} → ${updates.qty}`,
+      });
     }
   }
 
   return { ok: true };
 }
 
-// Active/désactive
-export async function toggleMagasinActif(magasinId, actif) {
-  const { error } = await supabase.from('magasins').update({ actif }).eq('id', magasinId);
+export async function toggleConsoActif(id, actif) {
+  const { error } = await supabase.from('articles_conso').update({ actif }).eq('id', id);
   return { ok: !error, error: error?.message };
 }
 
-// Supprime un magasin (avec vérification d'usage)
-export async function deleteMagasin(magasinId) {
-  // Vérifier l'usage
-  const [conso, cables, users, cmds] = await Promise.all([
-    supabase.from('articles_conso').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('types_cable').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('users_magasins').select('user_id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-    supabase.from('commandes').select('id', { count: 'exact', head: true }).eq('magasin_id', magasinId),
-  ]);
+export async function deleteConso(id) {
+  const { error } = await supabase.from('articles_conso').delete().eq('id', id);
+  return { ok: !error, error: error?.message };
+}
 
-  const blockers = [];
-  if (conso.count > 0) blockers.push(`${conso.count} consommable(s)`);
-  if (cables.count > 0) blockers.push(`${cables.count} type(s) de câble`);
-  if (users.count > 0) blockers.push(`${users.count} utilisateur(s)`);
-  if (cmds.count > 0) blockers.push(`${cmds.count} commande(s)`);
+// ===== TYPES CABLE =====
 
-  if (blockers.length > 0) {
-    return {
-      ok: false,
-      error: `Magasin utilisé : ${blockers.join(', ')}. Supprimez ou déplacez ces éléments d'abord, ou désactivez le magasin.`,
-    };
-  }
+export async function fetchCables(service, magasin) {
+  const { data, error } = await supabase
+    .from('types_cable')
+    .select('*')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .order('nom');
+  return { ok: !error, data: data || [], error: error?.message };
+}
 
-  const { error } = await supabase.from('magasins').delete().eq('id', magasinId);
+export async function createCable({ ref_type, nom, categorie, seuil, prix_ht, service, magasin }) {
+  const { data, error } = await supabase
+    .from('types_cable')
+    .insert({
+      ref_type,
+      nom,
+      categorie,
+      seuil: parseInt(seuil) || 0,
+      prix_ht: parseFloat(prix_ht) || 0,
+      service_id: service,
+      magasin_id: magasin,
+      actif: true,
+    })
+    .select()
+    .single();
+  return { ok: !error, data, error: error?.message };
+}
+
+export async function updateCable(id, { ref_type, nom, categorie, seuil, prix_ht }) {
+  const updates = {};
+  if (ref_type !== undefined) updates.ref_type = ref_type || null;  // vide = null
+  if (nom !== undefined) updates.nom = nom;
+  if (categorie !== undefined) updates.categorie = categorie;
+  if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
+  if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  const { error } = await supabase.from('types_cable').update(updates).eq('id', id);
+  return { ok: !error, error: error?.message };
+}
+
+export async function toggleCableActif(id, actif) {
+  const { error } = await supabase.from('types_cable').update({ actif }).eq('id', id);
+  return { ok: !error, error: error?.message };
+}
+
+export async function deleteCable(id) {
+  // Les tourets liés seront supprimés en cascade (FK on delete cascade)
+  const { error } = await supabase.from('types_cable').delete().eq('id', id);
+  return { ok: !error, error: error?.message };
+}
+
+// ===== TOURETS =====
+
+export async function fetchTouretsForCable(typeCableId) {
+  const { data, error } = await supabase
+    .from('tourets')
+    .select('*')
+    .eq('type_cable_id', typeCableId)
+    .order('ref_touret');
+  return { ok: !error, data: data || [], error: error?.message };
+}
+
+export async function createTouret({ ref_touret, type_cable_id, initiale }) {
+  const init = parseInt(initiale);
+  if (!init || init <= 0) return { ok: false, error: 'Longueur invalide' };
+  const { data, error } = await supabase
+    .from('tourets')
+    .insert({ ref_touret, type_cable_id, initiale: init, restante: init })
+    .select()
+    .single();
+  return { ok: !error, data, error: error?.message };
+}
+
+export async function updateTouretRestante(id, restante, initiale) {
+  const r = parseInt(restante);
+  if (isNaN(r) || r < 0 || r > initiale) return { ok: false, error: 'Longueur invalide' };
+  const { error } = await supabase.from('tourets').update({ restante: r }).eq('id', id);
+  return { ok: !error, error: error?.message };
+}
+
+export async function deleteTouret(id) {
+  const { error } = await supabase.from('tourets').delete().eq('id', id);
   return { ok: !error, error: error?.message };
 }

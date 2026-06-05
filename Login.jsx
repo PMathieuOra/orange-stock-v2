@@ -54,3 +54,30 @@ export function stockLevel(qty, seuil) {
   if (qty <= seuil * 1.5) return 'low';
   return 'ok';
 }
+
+// Formate un prix en euros (HT)
+export function fmtPrice(value, opts = {}) {
+  if (value === null || value === undefined || isNaN(value)) return '—';
+  const n = Number(value);
+  const { showCurrency = true, decimals = 2 } = opts;
+  const formatted = n.toLocaleString('fr-FR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return showCurrency ? `${formatted} €` : formatted;
+}
+
+// Dégradé vert → orange → rouge selon un pourcentage (0-100)
+// 100% = vert, 50% = orange, 0% = rouge
+export function gradientColor(pct) {
+  const p = Math.max(0, Math.min(100, pct));
+  // 0-50% : rouge → orange (hue 0 → 30)
+  // 50-100% : orange → vert (hue 30 → 120)
+  let hue;
+  if (p < 50) {
+    hue = (p / 50) * 30;
+  } else {
+    hue = 30 + ((p - 50) / 50) * 90;
+  }
+  return `hsl(${hue}, 75%, 45%)`;
+}

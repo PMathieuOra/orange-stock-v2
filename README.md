@@ -1,126 +1,384 @@
-# 🍊 Orange Stock V2 — Application React
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { useSession } from '../contexts/SessionContext';
+import { useToast } from '../contexts/ToastContext';
+import { getServiceInfo } from '../lib/supabase';
+import { getMagasinInfo } from '../components/SessionSelectors';
+import { initials } from '../lib/helpers';
+import { Spinner } from '../components/ui';
 
-Application de gestion de stock multi-services / multi-magasins.
-**React + Vite + Tailwind + Supabase.**
+export default function Login() {
+  const { login, changePassword, completeLogin } = useAuth();
+  const { setScope } = useSession();
+  const { toast } = useToast();
+  const navigate = useNavigate();
 
----
+  const [step, setStep] = useState('login'); // 'login' | 'changePwd' | 'setup'
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-## 🚀 Démarrage rapide
+  // login fields
+  const [ident, setIdent] = useState('');
+  const [pwd, setPwd] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
 
-### 1. Prérequis
-- Node.js ≥ 18
-- Un projet Supabase configuré (voir le dossier `sql/`)
+  // pending user (between steps)
+  const [pendingUser, setPendingUser] = useState(null);
 
-### 2. Installation
-```bash
-npm install
-```
+  // change pwd fields
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
 
-### 3. Configuration Supabase
-```bash
-cp .env.example .env
-```
-Puis éditer `.env` avec vos clés (Supabase Dashboard → Project Settings → API) :
-```
-VITE_SUPABASE_URL=https://votre-projet.supabase.co
-VITE_SUPABASE_ANON_KEY=votre-clé-anon
-```
+  // setup fields
+  const [selService, setSelService] = useState(null);
+  const [selMagasin, setSelMagasin] = useState(null);
 
-### 4. Lancer en développement
-```bash
-npm run dev
-```
-→ Ouvre http://localhost:5173
+  async function handleLogin() {
+    setError('');
+    if (!ident.trim()) return setError('Identifiant requis');
+    if (!pwd || pwd.length < 4) return setError('Mot de passe trop court');
+    setLoading(true);
+    const res = await login(ident, pwd);
+    setLoading(false);
+    if (!res.ok) return setError(res.error);
 
-### 5. Build de production
-```bash
-npm run build
-npm run preview
-```
+    setPendingUser(res.user);
+    if (res.mustChangePwd) {
+      setStep('changePwd');
+    } else {
+      goToSetupOrFinish(res.user);
+    }
+  }
 
----
+  async function handleChangePwd() {
+    setError('');
+    if (newPwd.length < 8) return setError('Min. 8 caractères');
+    if (!/\d/.test(newPwd)) return setError('Doit contenir un chiffre');
+    if (!/[A-Z]/.test(newPwd) || !/[a-z]/.test(newPwd)) return setError('Maj + min requises');
+    if (newPwd !== confirmPwd) return setError('Les mots de passe ne correspondent pas');
+    setLoading(true);
+    const res = await changePassword(pendingUser.id, newPwd);
+    setLoading(false);
+    if (!res.ok) return setError(res.error);
+    toast('✓ Mot de passe mis à jour', 'success');
+    goToSetupOrFinish(pendingUser);
+  }
 
-## 🔑 Connexion
+  function goToSetupOrFinish(user) {
+    const needService = user.services.length > 1;
+    const needMagasin = user.magasins.length > 1;
+    if (!needService && !needMagasin) {
+      finish(user, user.services[0], user.magasins[0]);
+      return;
+    }
+    setSelService(needService ? null : user.services[0]);
+    setSelMagasin(needMagasin ? null : user.magasins[0]);
+    setStep('setup');
+  }
 
-| Identifiant (démo) | Rôle | Particularité |
-|--------------------|------|---------------|
-| `mathieu p` | Admin | Multi-service + multi-magasin (setup complet) |
-| `julien b` | User | Changement de mot de passe forcé |
-| `pierre m` | User | Mono-service / mono-magasin (setup sauté) |
+  function finish(user, svc, mag) {
+    completeLogin(user);
+    setScope(svc, mag);
+    toast(`Bienvenue ${user.prenom} !`, 'success');
+    navigate('/sortie');
+  }
 
-Mot de passe initial : **`0000`**
+  function handleSetup() {
+    if (!selService || !selMagasin) return toast('Choisissez un service et un magasin', 'error');
+    finish(pendingUser, selService, selMagasin);
+  }
 
-> La saisie de l'identifiant est tolérante : `mathieu p`, `Mathieu P`, `MATHIEU_P` fonctionnent tous.
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+        background: 'linear-gradient(135deg, #FFB066 0%, #FF7900 50%, #E66E00 100%)',
+      }}
+    >
+      <div
+        style={{
+          background: 'white',
+          borderRadius: 28,
+          boxShadow: '0 24px 80px rgba(255,121,0,0.25), 0 8px 24px rgba(0,0,0,0.1)',
+          width: '100%',
+          maxWidth: 440,
+          overflow: 'hidden',
+          animation: 'slide-up 0.5s cubic-bezier(0.2,0,0,1)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: '36px 32px 24px', textAlign: 'center' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                background: 'var(--orange)',
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'center',
+                paddingBottom: 12,
+              }}
+            >
+              <span style={{ width: 28, height: 4, background: 'white', borderRadius: 1 }} />
+            </div>
+            <div style={{ textAlign: 'left', lineHeight: 1.1 }}>
+              <div style={{ fontWeight: 900, fontSize: 22, letterSpacing: '-0.03em' }}>Stock</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Réseaux · Orange
+              </div>
+            </div>
+          </div>
+          {step === 'login' && (
+            <>
+              <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 6 }}>Connexion</h1>
+              <p style={{ fontSize: 14, color: 'var(--ink-3)' }}>Identifiez-vous pour accéder à votre stock.</p>
+            </>
+          )}
+          {step === 'changePwd' && (
+            <>
+              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 6 }}>Nouveau mot de passe</h1>
+              <p style={{ fontSize: 14, color: 'var(--ink-3)' }}>Première connexion : choisissez un mot de passe sécurisé.</p>
+            </>
+          )}
+          {step === 'setup' && pendingUser && (
+            <>
+              <div
+                className={pendingUser.avatar_couleur || 'c-orange'}
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: '100px',
+                  margin: '0 auto 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: 28,
+                  color: 'white',
+                }}
+              >
+                {initials(pendingUser.prenom, pendingUser.nom_initiale)}
+              </div>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>
+                Bonjour {pendingUser.prenom} 👋
+              </h1>
+              <p style={{ fontSize: 14, color: 'var(--ink-3)' }}>Choisissez vos préférences de session.</p>
+            </>
+          )}
+        </div>
 
----
+        {/* Body */}
+        <div style={{ padding: '8px 32px 32px' }}>
+          {error && (
+            <div
+              style={{
+                background: 'var(--red-light)',
+                border: '1.5px solid #FFC8CE',
+                borderRadius: 'var(--radius)',
+                padding: '12px 14px',
+                fontSize: 13,
+                fontWeight: 700,
+                color: 'var(--red)',
+                marginBottom: 16,
+              }}
+            >
+              {error}
+            </div>
+          )}
 
-## 📁 Structure
+          {step === 'login' && (
+            <>
+              <Field label="Identifiant">
+                <input
+                  className="login-input mono"
+                  placeholder="mathieu p, pierre m..."
+                  value={ident}
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  onChange={(e) => setIdent(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                />
+              </Field>
+              <Field label="Mot de passe">
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="login-input"
+                    type={showPwd ? 'text' : 'password'}
+                    placeholder="Votre mot de passe"
+                    value={pwd}
+                    onChange={(e) => setPwd(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                    style={{ paddingRight: 48 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd((s) => !s)}
+                    style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', fontSize: 12, fontWeight: 700 }}
+                  >
+                    {showPwd ? 'Cacher' : 'Voir'}
+                  </button>
+                </div>
+              </Field>
+              <button className="login-btn" onClick={handleLogin} disabled={loading}>
+                {loading ? <Spinner size={18} /> : 'Se connecter →'}
+              </button>
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '12px 14px',
+                  background: 'var(--orange-light)',
+                  border: '1.5px dashed #FFD9B0',
+                  borderRadius: 'var(--radius)',
+                  fontSize: 12,
+                  color: 'var(--orange-dark)',
+                  fontWeight: 600,
+                  lineHeight: 1.5,
+                }}
+              >
+                💡 <strong>Démo</strong> — Testez : <strong>mathieu p</strong> (admin), <strong>julien b</strong> (1ère
+                connexion), <strong>pierre m</strong>. MDP initial : <strong>0000</strong>
+              </div>
+            </>
+          )}
 
-```
-src/
-├── lib/
-│   ├── supabase.js       # Client Supabase + référentiel services
-│   └── helpers.js        # Utilitaires (dates, initiales, normalisation...)
-├── contexts/
-│   ├── AuthContext.jsx   # Authentification (login, bcrypt, session)
-│   ├── SessionContext.jsx# Service + magasin actifs
-│   └── ToastContext.jsx  # Notifications
-├── hooks/
-│   └── useStock.js       # Récupération du stock filtré par scope
-├── components/
-│   ├── Layout.jsx        # Header + navigation responsive
-│   ├── SessionSelectors.jsx # Pastilles service/magasin
-│   └── ui/index.jsx      # Kit UI (Button, Card, Badge, Spinner...)
-├── pages/
-│   ├── Login.jsx         # ✅ Complet (3 étapes)
-│   ├── Sortie.jsx        # ✅ Câblé (liste + panier)
-│   ├── Stock.jsx         # ✅ Câblé (onglets + critiques)
-│   ├── Stats.jsx         # ✅ Câblé (KPI + top + journal)
-│   ├── Admin.jsx         # ✅ Hub
-│   ├── Commandes.jsx     # 🟡 Câblé (liste) — CRUD à enrichir
-│   ├── Articles.jsx      # 🟡 Câblé (liste) — CRUD à enrichir
-│   ├── Utilisateurs.jsx  # 🟡 Câblé (liste) — CRUD à enrichir
-│   └── Magasins.jsx      # 🟡 Câblé (liste) — CRUD à enrichir
-├── App.jsx               # Routing + protection des routes
-└── main.jsx              # Point d'entrée
-```
+          {step === 'changePwd' && (
+            <>
+              <Field label="Nouveau mot de passe">
+                <input className="login-input" type="password" placeholder="Min. 8 caractères, 1 chiffre, maj+min" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+              </Field>
+              <Field label="Confirmer">
+                <input
+                  className="login-input"
+                  type="password"
+                  placeholder="Retapez le mot de passe"
+                  value={confirmPwd}
+                  onChange={(e) => setConfirmPwd(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleChangePwd()}
+                />
+              </Field>
+              <button className="login-btn" onClick={handleChangePwd} disabled={loading}>
+                {loading ? <Spinner size={18} /> : 'Mettre à jour →'}
+              </button>
+            </>
+          )}
 
-**Légende :** ✅ fonctionnel · 🟡 squelette câblé sur Supabase (lecture OK, écriture à enrichir)
+          {step === 'setup' && pendingUser && (
+            <>
+              {pendingUser.services.length > 1 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+                    Service
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {pendingUser.services.map((id) => (
+                      <ChoiceCard key={id} info={getServiceInfo(id)} selected={selService === id} onClick={() => setSelService(id)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {pendingUser.magasins.length > 1 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+                    Magasin
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {pendingUser.magasins.map((id) => (
+                      <ChoiceCard key={id} info={getMagasinInfo(id)} selected={selMagasin === id} onClick={() => setSelMagasin(id)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <button className="login-btn" onClick={handleSetup} disabled={!selService || !selMagasin}>
+                Continuer →
+              </button>
+            </>
+          )}
+        </div>
+      </div>
 
----
+      <style>{`
+        .login-input {
+          width: 100%;
+          padding: 16px;
+          border: 1.5px solid var(--line);
+          border-radius: var(--radius);
+          background: var(--bg);
+          font-family: inherit;
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--ink);
+          outline: none;
+          transition: all 0.15s;
+        }
+        .login-input:focus {
+          border-color: var(--orange);
+          background: white;
+          box-shadow: 0 0 0 4px var(--orange-glow);
+        }
+        .login-btn {
+          width: 100%;
+          background: var(--orange);
+          color: white;
+          border: none;
+          border-radius: var(--radius);
+          padding: 16px;
+          font-family: inherit;
+          font-weight: 800;
+          font-size: 15px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          box-shadow: var(--shadow-orange);
+          transition: all 0.15s;
+        }
+        .login-btn:hover:not(:disabled) { background: var(--orange-dark); }
+        .login-btn:disabled { background: var(--line); color: var(--ink-4); cursor: not-allowed; box-shadow: none; }
+      `}</style>
+    </div>
+  );
+}
 
-## 🧩 Architecture technique
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
 
-### Authentification
-- **Pas de Supabase Auth** : table `users` maison + `bcryptjs` côté client
-- Session stockée dans `sessionStorage`
-- Identifiant `prenom_initiale` (ex `mathieu_p`)
-
-### Filtrage par périmètre
-Toutes les données sont filtrées par le couple **(service, magasin)** actif, stocké dans `SessionContext`. Le changement de périmètre via les pastilles du header rafraîchit automatiquement les pages (via les hooks `useStock` / `useScopedTable`).
-
-### Style
-Reprend les design tokens des prototypes HTML (couleurs Orange, police Manrope, rayons, ombres). Variables CSS dans `src/styles/index.css` + config Tailwind.
-
----
-
-## 🔜 Pour enrichir les pages 🟡
-
-Chaque page admin charge déjà ses données depuis Supabase. Pour les rendre complètes, il reste à ajouter les **actions d'écriture** :
-
-- **Commandes** : création (`generer_numero_commande` RPC), édition lignes, réception partielle → `insert/update` sur `commandes` + `commande_lignes` + log dans `mouvements`
-- **Articles** : CRUD `articles_conso` / `types_cable`, gestion tourets, import Excel
-- **Utilisateurs** : création avec `generer_identifiant` RPC, hash bcrypt du MDP `0000`
-- **Magasins** : CRUD `magasins` + `magasins_services`
-- **Sortie** : valider le panier = décrémenter le stock + insérer dans `mouvements`
-
-Le pattern est en place partout (hooks, contextes, UI kit), il suffit de suivre le modèle des pages ✅.
-
----
-
-## 📦 Dépendances clés
-- `@supabase/supabase-js` — client BDD
-- `react-router-dom` — navigation
-- `bcryptjs` — hash mot de passe
-- `vite` + `@vitejs/plugin-react` — build
-- `tailwindcss` — styles
+function ChoiceCard({ info, selected, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: selected ? 'var(--orange-light)' : 'white',
+        border: `1.5px solid ${selected ? 'var(--orange)' : 'var(--line)'}`,
+        borderRadius: 'var(--radius)',
+        padding: '14px 12px',
+        cursor: 'pointer',
+        textAlign: 'center',
+        fontFamily: 'inherit',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 6,
+        boxShadow: selected ? '0 0 0 3px var(--orange-glow)' : 'none',
+      }}
+    >
+      <div style={{ fontSize: 24 }}>{info.icon}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--ink)' }}>{info.nom}</div>
+    </button>
+  );
+}

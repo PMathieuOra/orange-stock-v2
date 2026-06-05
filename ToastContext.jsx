@@ -16,21 +16,22 @@ export async function fetchArticlesForScope(service, magasin, type) {
   if (type === 'cable') {
     const { data } = await supabase
       .from('types_cable')
-      .select('ref_type, nom, categorie')
+      .select('ref_type, nom, categorie, prix_ht')
       .eq('service_id', service)
       .eq('magasin_id', magasin)
       .eq('actif', true)
+      .not('ref_type', 'is', null)  // exclure les câbles sans EAN (pas commandables)
       .order('nom');
-    return (data || []).map((c) => ({ ref: c.ref_type, nom: c.nom }));
+    return (data || []).map((c) => ({ ref: c.ref_type, nom: c.nom, prix_ht: c.prix_ht || 0, categorie: c.categorie }));
   }
   const { data } = await supabase
     .from('articles_conso')
-    .select('ref, nom')
+    .select('ref, nom, prix_ht')
     .eq('service_id', service)
     .eq('magasin_id', magasin)
     .eq('actif', true)
     .order('nom');
-  return data || [];
+  return (data || []).map((c) => ({ ...c, prix_ht: c.prix_ht || 0 }));
 }
 
 // Crée une commande + ses lignes
