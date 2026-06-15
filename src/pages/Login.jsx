@@ -229,22 +229,6 @@ export default function Login() {
               <button className="login-btn" onClick={handleLogin} disabled={loading}>
                 {loading ? <Spinner size={18} /> : 'Se connecter →'}
               </button>
-              <div
-                style={{
-                  marginTop: 14,
-                  padding: '12px 14px',
-                  background: 'var(--orange-light)',
-                  border: '1.5px dashed #FFD9B0',
-                  borderRadius: 'var(--radius)',
-                  fontSize: 12,
-                  color: 'var(--orange-dark)',
-                  fontWeight: 600,
-                  lineHeight: 1.5,
-                }}
-              >
-                💡 <strong>Démo</strong> — Testez : <strong>mathieu p</strong> (admin), <strong>julien b</strong> (1ère
-                connexion), <strong>pierre m</strong>. MDP initial : <strong>0000</strong>
-              </div>
             </>
           )}
 

@@ -6,17 +6,29 @@ import { PageLoader, Empty, Badge } from '../components/ui';
 export default function Stock() {
   const { items, loading, error } = useStock();
   const [tab, setTab] = useState('all'); // 'all' | 'critical' | 'conso' | 'fibre' | 'cuivre'
+  const [search, setSearch] = useState('');
 
   const norm = (s) => String(s || '').toLowerCase().trim();
 
   const filtered = useMemo(() => items.filter((it) => {
     const cat = norm(it.categorie);
-    if (tab === 'critical') return it.est_critique && it.actif;
-    if (tab === 'conso') return it.type === 'conso';
-    if (tab === 'fibre') return it.type === 'cable' && cat === 'fibre';
-    if (tab === 'cuivre') return it.type === 'cable' && cat === 'cuivre';
-    return true;
-  }), [items, tab]);
+    // Filtre catégorie
+    if (tab === 'critical' && !(it.est_critique && it.actif)) return false;
+    if (tab === 'conso' && it.type !== 'conso') return false;
+    if (tab === 'fibre' && (it.type !== 'cable' || cat !== 'fibre')) return false;
+    if (tab === 'cuivre' && (it.type !== 'cable' || cat !== 'cuivre')) return false;
+    // Filtre recherche : ref + nom + tourets (pour les câbles)
+    if (!search.trim()) return true;
+    const q = search.toLowerCase().trim();
+    const refStr = String(it.ref || '');
+    const nomStr = String(it.nom || '');
+    if ((refStr + ' ' + nomStr).toLowerCase().includes(q)) return true;
+    // Pour les câbles, chercher aussi dans les noms de tourets
+    if (it.type === 'cable' && Array.isArray(it.tourets)) {
+      return it.tourets.some((t) => String(t.ref_touret || '').toLowerCase().includes(q));
+    }
+    return false;
+  }), [items, tab, search]);
 
   const counts = useMemo(() => ({
     all: items.length,
@@ -39,6 +51,18 @@ export default function Stock() {
       <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Inventaire</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>État du stock par périmètre.</p>
+
+        <input
+          placeholder="🔍 Rechercher par référence, nom ou n° de touret..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 12 }}
+        />
+        {search && (
+          <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginBottom: 8 }}>
+            {filtered.length} résultat{filtered.length > 1 ? 's' : ''}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto' }} className="no-scrollbar">
           {tabs.map((t) => {

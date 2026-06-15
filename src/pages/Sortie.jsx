@@ -39,9 +39,16 @@ export default function Sortie() {
     if (!it.actif) return false;
     if (it.qty <= 0) return false;
     if (!matchCategory(it, catFilter)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (it.ref + ' ' + it.nom).toLowerCase().includes(q);
+    if (!search.trim()) return true;
+    const q = search.toLowerCase().trim();
+    const refStr = String(it.ref || '');
+    const nomStr = String(it.nom || '');
+    if ((refStr + ' ' + nomStr).toLowerCase().includes(q)) return true;
+    // Pour les câbles : chercher aussi dans les noms de tourets
+    if (it.type === 'cable' && Array.isArray(it.tourets)) {
+      return it.tourets.some((t) => String(t.ref_touret || '').toLowerCase().includes(q));
+    }
+    return false;
   }), [items, catFilter, search]);
 
   // Compteurs : uniquement les articles actifs avec stock
@@ -170,7 +177,7 @@ export default function Sortie() {
         </p>
 
         <input
-          placeholder="🔍 Rechercher un article..."
+          placeholder="🔍 Rechercher par référence, nom ou n° de touret..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 12 }}
@@ -232,19 +239,16 @@ export default function Sortie() {
             {filtered.map((it) => {
               const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type);
               const inCartTotal = inCartLines.reduce((s, x) => s + x.qty, 0);
-              // Badge catégorie pour debug visuel
-              const catBadge = it.type === 'conso'
-                ? { label: 'CONSO', color: '#FF7900', bg: '#FFF5EB' }
-                : norm(it.categorie) === 'fibre'
-                  ? { label: 'FIBRE', color: '#00A86B', bg: '#E8F7F0' }
-                  : norm(it.categorie) === 'cuivre'
-                    ? { label: 'CUIVRE', color: '#D97706', bg: '#FEF6E7' }
-                    : { label: `?(${it.categorie || 'null'})`, color: '#E63946', bg: '#FDECEE' };
+              // Badge catégorie visible
+              let catBadge = null;
+              if (it.type === 'conso') catBadge = { label: 'CONSO', color: '#FF7900', bg: '#FFF5EB' };
+              else if (norm(it.categorie) === 'fibre') catBadge = { label: 'FIBRE', color: '#00A86B', bg: '#E8F7F0' };
+              else if (norm(it.categorie) === 'cuivre') catBadge = { label: 'CUIVRE', color: '#D97706', bg: '#FEF6E7' };
               return (
-                <div key={`${it.type}-${it.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
+                <div key={`${it.type}-${it.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                      <span style={{
+                      {catBadge && <span style={{
                         background: catBadge.bg,
                         color: catBadge.color,
                         fontSize: 9,
@@ -252,7 +256,7 @@ export default function Sortie() {
                         padding: '2px 6px',
                         borderRadius: '4px',
                         letterSpacing: '0.05em',
-                      }}>{catBadge.label}</span>
+                      }}>{catBadge.label}</span>}
                       <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nom}</div>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

@@ -76,18 +76,24 @@ export default function Commandes() {
       const refCol = data.type === 'cable' ? 'ref_type' : 'ref';
       const { data: articles } = await supabase
         .from(table)
-        .select(`${refCol}, prix_ht`)
+        .select(data.type === 'cable' ? `${refCol}, nom, categorie, prix_ht` : `${refCol}, nom, prix_ht`)
         .in(refCol, refs)
         .eq('service_id', data.service_id)
         .eq('magasin_id', data.magasin_id);
 
-      const prixByRef = {};
+      const infoByRef = {};
       (articles || []).forEach((a) => {
-        prixByRef[a[refCol]] = a.prix_ht || 0;
+        infoByRef[a[refCol]] = {
+          nom: a.nom,
+          prix_ht: a.prix_ht || 0,
+          categorie: a.categorie,
+        };
       });
       data.commande_lignes = data.commande_lignes.map((l) => ({
         ...l,
-        prix_ht: prixByRef[l.ref] || 0,
+        nom: infoByRef[l.ref]?.nom || null,
+        prix_ht: infoByRef[l.ref]?.prix_ht || 0,
+        categorie: infoByRef[l.ref]?.categorie || null,
       }));
     }
 
@@ -183,10 +189,14 @@ export default function Commandes() {
               return (
                 <div key={l.id} style={card}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>{l.ref}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-                      Reçu {l.qty_recue} / {l.qty_commandee}
-                      {l.prix_ht > 0 && ` · ${fmtPrice(l.prix_ht)}${selected.type === 'cable' ? '/m' : '/u'}`}
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>
+                      {l.nom || <span className="mono">{l.ref}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {l.nom && <span className="mono">{l.ref}</span>}
+                      {l.nom && <span>·</span>}
+                      <span>Reçu {l.qty_recue} / {l.qty_commandee}</span>
+                      {l.prix_ht > 0 && <span>· {fmtPrice(l.prix_ht)}{selected.type === 'cable' ? '/m' : '/u'}</span>}
                     </div>
                   </div>
                   {sousTotal > 0 && (
@@ -229,7 +239,7 @@ export default function Commandes() {
 
 function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
   const [receptions, setReceptions] = useState(
-    (commande.commande_lignes || []).map((l) => ({ ligneId: l.id, ref: l.ref, reste: l.qty_commandee - l.qty_recue, qtyAjout: 0 }))
+    (commande.commande_lignes || []).map((l) => ({ ligneId: l.id, ref: l.ref, nom: l.nom, reste: l.qty_commandee - l.qty_recue, qtyAjout: 0 }))
   );
   const [saving, setSaving] = useState(false);
 
@@ -256,8 +266,14 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
           {receptions.map((r) => (
             <div key={r.ligneId} style={card}>
               <div style={{ flex: 1 }}>
-                <div className="mono" style={{ fontWeight: 700, fontSize: 14 }}>{r.ref}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>Reste à recevoir : {r.reste}</div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>
+                  {r.nom || <span className="mono">{r.ref}</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {r.nom && <span className="mono">{r.ref}</span>}
+                  {r.nom && <span>·</span>}
+                  <span>Reste à recevoir : {r.reste}</span>
+                </div>
               </div>
               {r.reste > 0 ? (
                 <input type="number" min="0" max={r.reste} value={r.qtyAjout} onChange={(e) => setQty(r.ligneId, e.target.value)} style={{ width: 80, padding: '10px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }} />
@@ -299,8 +315,9 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   const [lignes, setLignes] = useState([]);
   const [saving, setSaving] = useState(false);
   const [catFilter, setCatFilter] = useState('all'); // 'all' | 'fibre' | 'cuivre' (mode câble uniquement)
+  const [search, setSearch] = useState('');
 
-  useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); setCatFilter('all'); }, [service, magasin, type]);
+  useEffect(() => { fetchArticlesForScope(service, magasin, type).then(setAvailable); setLignes([]); setCatFilter('all'); setSearch(''); }, [service, magasin, type]);
 
   function addLigne(ref, nom, prix_ht) { if (lignes.some((l) => l.ref === ref)) return; setLignes((l) => [...l, { ref, nom, prix_ht: prix_ht || 0, qty_commandee: 1 }]); }
   function setQty(ref, qty) { setLignes((l) => l.map((x) => (x.ref === ref ? { ...x, qty_commandee: Math.max(1, parseInt(qty) || 1) } : x))); }
@@ -319,6 +336,11 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
   const notAdded = available.filter((a) => {
     if (lignes.some((l) => l.ref === a.ref)) return false;
     if (type === 'cable' && catFilter !== 'all' && a.categorie !== catFilter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      const text = `${a.ref || ''} ${a.nom || ''}`.toLowerCase();
+      if (!text.includes(q)) return false;
+    }
     return true;
   });
   const catCounts = {
@@ -399,6 +421,14 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
 
         <div style={{ marginBottom: 16 }}>
           <div style={fieldLabel}>Ajouter un article</div>
+
+          {/* Barre de recherche */}
+          <input
+            placeholder="🔍 Rechercher par référence ou nom..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, outline: 'none', marginBottom: 12 }}
+          />
 
           {/* Filtre catégorie en mode câble */}
           {type === 'cable' && (

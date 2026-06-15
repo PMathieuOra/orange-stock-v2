@@ -167,7 +167,7 @@ export default function Stats() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {ruptures.map((r) => (
-                      <div key={`${r.type}-${r.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid var(--red)', borderRadius: 'var(--radius)' }}>
+                      <div key={`${r.type}-${r.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid var(--red)', borderRadius: 'var(--radius)' }}>
                         <div style={{ width: 40, height: 40, borderRadius: '100px', background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <span style={{ fontSize: 20 }}>🔴</span>
                         </div>
