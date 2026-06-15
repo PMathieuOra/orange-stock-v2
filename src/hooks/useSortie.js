@@ -1,18 +1,19 @@
 import { supabase } from '../lib/supabase';
 
 // Récupère les tourets disponibles pour un câble (avec restante > 0)
-export async function fetchTouretsForRef(refType, service, magasin) {
+// On utilise l'ID du câble (toujours présent) plutôt que ref_type (qui peut être NULL)
+export async function fetchTouretsForRef(cableId, service, magasin) {
   const { data: tc, error } = await supabase
     .from('types_cable')
-    .select('id, nom, prix_ht, tourets(id, ref_touret, initiale, restante)')
-    .eq('ref_type', refType)
+    .select('id, nom, prix_ht, ref_type, tourets(id, ref_touret, initiale, restante)')
+    .eq('id', cableId)
     .eq('service_id', service)
     .eq('magasin_id', magasin)
     .maybeSingle();
   if (error || !tc) return { ok: false, error: error?.message || 'Câble introuvable' };
   // Filtrer les tourets avec du stock
   const tourets = (tc.tourets || []).filter((t) => t.restante > 0);
-  return { ok: true, nom: tc.nom, prix_ht: tc.prix_ht || 0, tourets };
+  return { ok: true, nom: tc.nom, ref_type: tc.ref_type, prix_ht: tc.prix_ht || 0, tourets };
 }
 
 // Sortie de stock pour un panier

@@ -61,6 +61,17 @@ export default function Articles() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // useMemo doit être appelé AVANT tout early return (Rules of Hooks)
+  const itemsRaw = tab === 'conso' ? consos : cables;
+  const items = useMemo(() => {
+    if (!search.trim()) return itemsRaw;
+    const q = search.toLowerCase().trim();
+    return itemsRaw.filter((it) => {
+      const ref = tab === 'conso' ? (it.ref || '') : (it.ref_type || '');
+      return (ref + ' ' + (it.nom || '')).toLowerCase().includes(q);
+    });
+  }, [itemsRaw, search, tab]);
+
   if (!isAdmin) {
     return <Layout brandTitle="Articles" brandSub="Administration"><Denied /></Layout>;
   }
@@ -108,16 +119,6 @@ export default function Articles() {
   }
 
   // ===== LIST VIEW =====
-  const itemsRaw = tab === 'conso' ? consos : cables;
-  const items = useMemo(() => {
-    if (!search.trim()) return itemsRaw;
-    const q = search.toLowerCase().trim();
-    return itemsRaw.filter((it) => {
-      const ref = tab === 'conso' ? (it.ref || '') : (it.ref_type || '');
-      return (ref + ' ' + (it.nom || '')).toLowerCase().includes(q);
-    });
-  }, [itemsRaw, search, tab]);
-
   return (
     <Layout brandTitle="Articles" brandSub="Administration">
       <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>

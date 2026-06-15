@@ -59,9 +59,9 @@ export default function Sortie() {
     if (item.type === 'conso') {
       addConsoToCart(item);
     } else {
-      // Câble : ouvrir le sélecteur de touret
+      // Câble : ouvrir le sélecteur de touret (utilise l'ID qui est toujours présent)
       setTouretPicker({ item, tourets: [], loading: true });
-      const res = await fetchTouretsForRef(item.ref, service, magasin);
+      const res = await fetchTouretsForRef(item.id, service, magasin);
       if (!res.ok) {
         toast(res.error, 'error');
         setTouretPicker(null);
@@ -232,11 +232,30 @@ export default function Sortie() {
             {filtered.map((it) => {
               const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type);
               const inCartTotal = inCartLines.reduce((s, x) => s + x.qty, 0);
+              // Badge catégorie pour debug visuel
+              const catBadge = it.type === 'conso'
+                ? { label: 'CONSO', color: '#FF7900', bg: '#FFF5EB' }
+                : norm(it.categorie) === 'fibre'
+                  ? { label: 'FIBRE', color: '#00A86B', bg: '#E8F7F0' }
+                  : norm(it.categorie) === 'cuivre'
+                    ? { label: 'CUIVRE', color: '#D97706', bg: '#FEF6E7' }
+                    : { label: `?(${it.categorie || 'null'})`, color: '#E63946', bg: '#FDECEE' };
               return (
                 <div key={`${it.type}-${it.ref}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{it.nom}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                      <span style={{
+                        background: catBadge.bg,
+                        color: catBadge.color,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        letterSpacing: '0.05em',
+                      }}>{catBadge.label}</span>
+                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nom}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="mono">{it.ref}</span>
                       <span>·</span>
                       <span>{it.qty} {it.type === 'cable' ? 'm' : 'u.'}</span>
