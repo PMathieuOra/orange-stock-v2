@@ -264,6 +264,9 @@ export default function Sortie() {
                       <span>·</span>
                       <span>{it.qty} {it.type === 'cable' ? 'm' : 'u.'}</span>
                       {it.type === 'cable' && <span>· {it.nb_tourets} touret(s)</span>}
+                      {it.type === 'conso' && it.emplacement && (
+                        <span style={{ color: 'var(--orange)', fontWeight: 700 }}>· 📍 {it.emplacement}</span>
+                      )}
                       {it.est_critique && <Badge color="red">⚠ Critique</Badge>}
                       {inCartTotal > 0 && <Badge color="orange">🛒 {inCartTotal}{it.type === 'cable' ? 'm' : ''} dans le panier</Badge>}
                     </div>
@@ -394,8 +397,14 @@ function TouretPicker({ item, tourets, loading, onClose, onAdd }) {
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{t.ref_touret}</div>
-                        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-                          Initial : {t.initiale}m
+                        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <span>Initial : {t.initiale}m</span>
+                          {t.emplacement && (
+                            <>
+                              <span>·</span>
+                              <span style={{ color: 'var(--orange-dark)', fontWeight: 700 }}>📍 {t.emplacement}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>

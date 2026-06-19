@@ -5,7 +5,7 @@ import { useSession } from '../contexts/SessionContext';
 import { supabase } from '../lib/supabase';
 import { Denied, PageLoader, Empty, Badge } from '../components/ui';
 import { fmtRelative, displayName, fmtPrice, initials } from '../lib/helpers';
-import { fetchStatsKPIs, fetchTops, fetchEvolution, fetchRuptures } from '../hooks/useStats';
+import { fetchStatsKPIs, fetchTops, fetchEvolution, fetchRuptures, fetchCommandesEvolution } from '../hooks/useStats';
 
 const PERIODS = [
   { id: 'week', label: 'Semaine' },
@@ -23,6 +23,7 @@ export default function Stats() {
   const [kpis, setKpis] = useState(null);
   const [tops, setTops] = useState({ topArticles: [], topTechniciens: [] });
   const [evolution, setEvolution] = useState([]);
+  const [cmdEvo, setCmdEvo] = useState({ buckets: [], totalCout: 0, totalNb: 0, moyCout: 0 });
   const [ruptures, setRuptures] = useState([]);
   const [mouvements, setMouvements] = useState([]);
 
@@ -30,10 +31,11 @@ export default function Stats() {
     if (!service || !magasin) return;
     setLoading(true);
 
-    const [k, t, e, r, m] = await Promise.all([
+    const [k, t, e, ce, r, m] = await Promise.all([
       fetchStatsKPIs({ service, magasin, period }),
       fetchTops({ service, magasin, period, limit: 5 }),
       fetchEvolution({ service, magasin, months: 12 }),
+      fetchCommandesEvolution({ service, magasin, period }),
       fetchRuptures({ service, magasin }),
       supabase
         .from('mouvements')
@@ -47,6 +49,7 @@ export default function Stats() {
     setKpis(k);
     setTops(t);
     setEvolution(e);
+    setCmdEvo(ce);
     setRuptures(r);
     setMouvements(m.data || []);
     setLoading(false);
@@ -157,6 +160,9 @@ export default function Stats() {
                     maxValue={Math.max(...tops.topArticles.map((a) => a.sorties), 1)}
                   />
                 </div>
+
+                {/* Synthèse des commandes */}
+                <CommandesSynthese data={cmdEvo} />
               </>
             )}
 
@@ -306,6 +312,189 @@ function EvolutionChart({ data }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ===== Synthèse des commandes (KPIs + graphique combo barres + ligne) =====
+function CommandesSynthese({ data }) {
+  const { buckets, totalCout, totalNb, moyCout } = data;
+  const maxCout = Math.max(...buckets.map((b) => b.cout), 1);
+  const maxNb = Math.max(...buckets.map((b) => b.nb), 1);
+
+  // Pour la ligne SVG : générer les points
+  const chartH = 260;
+  const chartW = 100; // en %, on travaille en pourcentages
+  const padTop = 20;
+  const padBottom = 30;
+  const usableH = chartH - padTop - padBottom;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 4px' }}>
+        🛒 Synthèse des commandes
+      </h2>
+      <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600, margin: '0 0 12px' }}>
+        Coût et nombre de commandes sur la période.
+      </p>
+
+      {/* KPI cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--orange)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>💰 Coût total</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--orange)' }}>{fmtPrice(totalCout)}</div>
+        </div>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--blue)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>📋 Nombre</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--blue)' }}>{totalNb}</div>
+        </div>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--green)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>📊 Coût moyen / cmd</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--green)' }}>{fmtPrice(moyCout)}</div>
+        </div>
+      </div>
+
+      {/* Graphique combo */}
+      <div style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', padding: 16 }}>
+        {/* Légende */}
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginBottom: 12, fontSize: 12, fontWeight: 700 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--blue)' }}>
+            <span style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--blue)' }} />
+            Nombre de commandes
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--orange)' }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--orange)' }} />
+            Coût (€)
+          </span>
+        </div>
+
+        {/* Zone graphique avec axes */}
+        <div style={{ position: 'relative', height: chartH, marginLeft: 50, marginRight: 50 }}>
+          {/* Axe Y gauche (coût) */}
+          <div style={{ position: 'absolute', left: -45, top: padTop, height: usableH, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 10, color: 'var(--orange)', fontWeight: 700, alignItems: 'flex-end' }}>
+            <span>{fmtPrice(maxCout, { showCurrency: false, decimals: 0 })} €</span>
+            <span>{fmtPrice(maxCout * 0.75, { showCurrency: false, decimals: 0 })} €</span>
+            <span>{fmtPrice(maxCout * 0.5, { showCurrency: false, decimals: 0 })} €</span>
+            <span>{fmtPrice(maxCout * 0.25, { showCurrency: false, decimals: 0 })} €</span>
+            <span>0 €</span>
+          </div>
+
+          {/* Axe Y droit (nombre) */}
+          <div style={{ position: 'absolute', right: -40, top: padTop, height: usableH, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 10, color: 'var(--blue)', fontWeight: 700 }}>
+            <span>{maxNb}</span>
+            <span>{Math.round(maxNb * 0.75)}</span>
+            <span>{Math.round(maxNb * 0.5)}</span>
+            <span>{Math.round(maxNb * 0.25)}</span>
+            <span>0</span>
+          </div>
+
+          {/* Lignes horizontales grille */}
+          {[0, 0.25, 0.5, 0.75, 1].map((p) => (
+            <div key={p} style={{ position: 'absolute', left: 0, right: 0, top: padTop + usableH * (1 - p), borderTop: '1px dashed var(--line-2)' }} />
+          ))}
+
+          {/* Barres (coût) */}
+          <div style={{ position: 'absolute', left: 0, right: 0, top: padTop, height: usableH, display: 'flex', alignItems: 'flex-end', gap: 4, paddingLeft: 4, paddingRight: 4 }}>
+            {buckets.map((b) => {
+              const h = (b.cout / maxCout) * 100;
+              return (
+                <div
+                  key={b.key}
+                  title={`${b.label} : ${fmtPrice(b.cout)}`}
+                  style={{
+                    flex: 1,
+                    height: `${h}%`,
+                    minHeight: b.cout > 0 ? 2 : 0,
+                    background: 'linear-gradient(180deg, var(--orange), #E66E00)',
+                    borderRadius: '4px 4px 0 0',
+                    transition: 'opacity 0.2s',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Ligne (nombre) en SVG */}
+          <svg
+            style={{ position: 'absolute', left: 0, right: 0, top: padTop, height: usableH, width: '100%', pointerEvents: 'none' }}
+            preserveAspectRatio="none"
+            viewBox="0 0 100 100"
+          >
+            {/* Zone sous la courbe */}
+            <polygon
+              fill="rgba(37, 99, 235, 0.1)"
+              points={`${buckets.map((b, i) => {
+                const x = ((i + 0.5) / buckets.length) * 100;
+                const y = 100 - (b.nb / maxNb) * 100;
+                return `${x},${y}`;
+              }).join(' ')} ${((buckets.length - 0.5) / buckets.length) * 100},100 ${(0.5 / buckets.length) * 100},100`}
+            />
+            {/* Ligne */}
+            <polyline
+              fill="none"
+              stroke="var(--blue)"
+              strokeWidth="0.6"
+              vectorEffect="non-scaling-stroke"
+              style={{ strokeWidth: 2.5 }}
+              points={buckets.map((b, i) => {
+                const x = ((i + 0.5) / buckets.length) * 100;
+                const y = 100 - (b.nb / maxNb) * 100;
+                return `${x},${y}`;
+              }).join(' ')}
+            />
+          </svg>
+
+          {/* Points (nombre) en HTML pour pouvoir afficher des tooltips */}
+          <div style={{ position: 'absolute', left: 0, right: 0, top: padTop, height: usableH, pointerEvents: 'none' }}>
+            {buckets.map((b, i) => {
+              const x = ((i + 0.5) / buckets.length) * 100;
+              const y = 100 - (b.nb / maxNb) * 100;
+              return (
+                <div
+                  key={b.key}
+                  title={`${b.label} : ${b.nb} commande${b.nb > 1 ? 's' : ''}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${x}%`,
+                    top: `${y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background: 'var(--blue)',
+                    border: '2px solid white',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    pointerEvents: 'auto',
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Labels axe X */}
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: padBottom, display: 'flex', gap: 4, paddingLeft: 4, paddingRight: 4, alignItems: 'flex-end' }}>
+            {buckets.map((b) => (
+              <div
+                key={b.key}
+                style={{
+                  flex: 1,
+                  fontSize: 10,
+                  color: 'var(--ink-4)',
+                  fontWeight: 700,
+                  textAlign: 'center',
+                  textTransform: 'capitalize',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >{b.label}</div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 export async function fetchTouretsForRef(cableId, service, magasin) {
   const { data: tc, error } = await supabase
     .from('types_cable')
-    .select('id, nom, prix_ht, ref_type, tourets(id, ref_touret, initiale, restante)')
+    .select('id, nom, prix_ht, ref_type, tourets(id, ref_touret, initiale, restante, emplacement)')
     .eq('id', cableId)
     .eq('service_id', service)
     .eq('magasin_id', magasin)

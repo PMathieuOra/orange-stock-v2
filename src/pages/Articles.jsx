@@ -11,7 +11,8 @@ import { touretStatus, fmtPrice } from '../lib/helpers';
 import {
   fetchConsos, createConso, updateConso, toggleConsoActif, deleteConso,
   fetchCables, createCable, updateCable, toggleCableActif, deleteCable,
-  fetchTouretsForCable, createTouret, updateTouretRestante, deleteTouret,
+  fetchTouretsForCable, createTouret, updateTouretRestante, updateTouretEmplacement, deleteTouret,
+  fetchEmplacementsSuggestions,
 } from '../hooks/useArticles';
 import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables } from '../hooks/useImport';
 
@@ -35,6 +36,7 @@ export default function Articles() {
   const [form, setForm] = useState(null); // {mode: 'create'|'edit', type, data}
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [emplacementSuggestions, setEmplacementSuggestions] = useState([]);
 
   // Sync activeScope with session on mount and session change
   useEffect(() => {
@@ -50,12 +52,14 @@ export default function Articles() {
   const fetchData = useCallback(async () => {
     if (!activeService || !activeMagasin) return;
     setLoading(true);
-    const [c, t] = await Promise.all([
+    const [c, t, suggestions] = await Promise.all([
       fetchConsos(activeService, activeMagasin),
       fetchCables(activeService, activeMagasin),
+      fetchEmplacementsSuggestions(activeService, activeMagasin),
     ]);
     setConsos(c.data);
     setCables(t.data);
+    setEmplacementSuggestions(suggestions || []);
     setLoading(false);
   }, [activeService, activeMagasin]);
 
@@ -83,6 +87,7 @@ export default function Articles() {
         type={detail.type}
         item={detail.item}
         activeMagasin={activeMagasin}
+        emplacementSuggestions={emplacementSuggestions}
         onBack={() => { setView('list'); fetchData(); }}
         onEdit={() => { setForm({ mode: 'edit', type: detail.type, data: detail.item }); setView('form'); }}
         toast={toast}
@@ -100,6 +105,7 @@ export default function Articles() {
         service={activeService}
         magasin={activeMagasin}
         userId={currentUser?.id}
+        emplacementSuggestions={emplacementSuggestions}
         onCancel={() => { setView(detail ? 'detail' : 'list'); setForm(null); }}
         onDone={async (newOrUpdated) => {
           setForm(null);
@@ -264,7 +270,7 @@ function ScopeModal({ current, onClose, onApply }) {
 }
 
 // ===== DETAIL VIEW =====
-function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
+function DetailView({ type, item, activeMagasin, emplacementSuggestions = [], onBack, onEdit, toast }) {
   const isCable = type === 'cable';
   const ref = isCable ? item.ref_type : item.ref;
   const [tourets, setTourets] = useState([]);
@@ -327,6 +333,9 @@ function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
           {isCable && <Info label="Tourets" value={`${tourets.length}`} />}
           <Info label={`Prix HT ${isCable ? '(€/m)' : '(€/unité)'}`} value={fmtPrice(item.prix_ht)} />
           <Info label="Valeur du stock" value={fmtPrice((isCable ? totalRestante : item.qty) * (item.prix_ht || 0))} />
+          {!isCable && (
+            <Info label="📍 Emplacement" value={item.emplacement || <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>Non renseigné</span>} />
+          )}
         </div>
 
         {isCable && (
@@ -339,6 +348,7 @@ function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
             {showTouretForm && (
               <TouretForm
                 typeCableId={item.id}
+                suggestions={emplacementSuggestions}
                 onCancel={() => setShowTouretForm(false)}
                 onDone={() => { setShowTouretForm(false); loadTourets(); }}
                 toast={toast}
@@ -350,7 +360,7 @@ function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {tourets.map((t) => (
-                  <TouretItem key={t.id} touret={t} onUpdate={loadTourets} toast={toast} />
+                  <TouretItem key={t.id} touret={t} suggestions={emplacementSuggestions} onUpdate={loadTourets} toast={toast} />
                 ))}
               </div>
             )}
@@ -361,17 +371,26 @@ function DetailView({ type, item, activeMagasin, onBack, onEdit, toast }) {
   );
 }
 
-function TouretItem({ touret, onUpdate, toast }) {
+function TouretItem({ touret, suggestions = [], onUpdate, toast }) {
   const [editing, setEditing] = useState(false);
   const [restante, setRestante] = useState(touret.restante);
+  const [emplacement, setEmplacement] = useState(touret.emplacement || '');
   const status = touretStatus(touret);
   const statusColors = { neuf: 'green', entame: 'amber', vide: 'red' };
   const statusLabels = { neuf: '🆕 Neuf', entame: '🔄 Entamé', vide: '⚠ Vide' };
 
   async function save() {
-    const res = await updateTouretRestante(touret.id, restante, touret.initiale);
-    if (res.ok) { toast(`✓ Touret ${touret.ref_touret} mis à jour`); setEditing(false); onUpdate(); }
-    else toast('Erreur : ' + res.error, 'error');
+    // Update restante d'abord (avec validation)
+    const r = await updateTouretRestante(touret.id, restante, touret.initiale);
+    if (!r.ok) return toast('Erreur : ' + r.error, 'error');
+    // Update emplacement séparément (sans validation)
+    if ((touret.emplacement || '') !== emplacement.trim()) {
+      const e = await updateTouretEmplacement(touret.id, emplacement);
+      if (!e.ok) return toast('Erreur emplacement : ' + e.error, 'error');
+    }
+    toast(`✓ Touret ${touret.ref_touret} mis à jour`);
+    setEditing(false);
+    onUpdate();
   }
 
   async function del() {
@@ -381,44 +400,61 @@ function TouretItem({ touret, onUpdate, toast }) {
     else toast('Erreur : ' + res.error, 'error');
   }
 
+  if (editing) {
+    return (
+      <div style={{ ...card, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.ref_touret}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>Initial : {touret.initiale} m</div>
+          </div>
+          <input type="number" min="0" max={touret.initiale} value={restante} onChange={(e) => setRestante(e.target.value)} style={{ width: 90, padding: 8, border: '1.5px solid var(--orange)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }} />
+          <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700 }}>m restant</span>
+        </div>
+        <EmplacementInput value={emplacement} onChange={setEmplacement} suggestions={suggestions} placeholder="📍 Emplacement (optionnel)" />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={save} style={{ flex: 1, background: 'var(--green)', color: 'white', border: 'none', borderRadius: '100px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>✓ Enregistrer</button>
+          <button onClick={() => { setRestante(touret.restante); setEmplacement(touret.emplacement || ''); setEditing(false); }} style={{ background: 'var(--line-2)', color: 'var(--ink)', border: 'none', borderRadius: '100px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>× Annuler</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={card}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.ref_touret}</div>
-        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-          Initial : {touret.initiale} m
+        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span>Initial : {touret.initiale} m</span>
+          {touret.emplacement && (
+            <>
+              <span>·</span>
+              <span style={{ color: 'var(--orange)' }}>📍 {touret.emplacement}</span>
+            </>
+          )}
         </div>
       </div>
-      {editing ? (
-        <>
-          <input type="number" min="0" max={touret.initiale} value={restante} onChange={(e) => setRestante(e.target.value)} style={{ width: 80, padding: 8, border: '1.5px solid var(--orange)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 700, textAlign: 'center' }} />
-          <button onClick={save} style={{ background: 'var(--green)', color: 'white', border: 'none', borderRadius: '100px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>✓</button>
-          <button onClick={() => { setRestante(touret.restante); setEditing(false); }} style={{ background: 'var(--line-2)', color: 'var(--ink)', border: 'none', borderRadius: '100px', padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>×</button>
-        </>
-      ) : (
-        <>
-          <div style={{ textAlign: 'right' }}>
-            <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.restante} m</div>
-            {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
-          </div>
-          <button onClick={() => setEditing(true)} style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
-          <button onClick={del} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
-        </>
-      )}
+      <div style={{ textAlign: 'right' }}>
+        <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.restante} m</div>
+        {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
+      </div>
+      <button onClick={() => setEditing(true)} style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
+      <button onClick={del} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
     </div>
   );
 }
 
-function TouretForm({ typeCableId, onCancel, onDone, toast }) {
+function TouretForm({ typeCableId, suggestions, onCancel, onDone, toast }) {
   const [ref, setRef] = useState('');
   const [initiale, setInitiale] = useState('');
+  const [emplacement, setEmplacement] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function submit() {
     if (!ref.trim()) return toast('Référence requise', 'error');
     if (!initiale || parseInt(initiale) <= 0) return toast('Longueur invalide', 'error');
     setSaving(true);
-    const res = await createTouret({ ref_touret: ref.trim(), type_cable_id: typeCableId, initiale });
+    const res = await createTouret({ ref_touret: ref.trim(), type_cable_id: typeCableId, initiale, emplacement });
     setSaving(false);
     if (res.ok) { toast(`✓ Touret ${ref} ajouté`); onDone(); }
     else toast('Erreur : ' + res.error, 'error');
@@ -428,22 +464,87 @@ function TouretForm({ typeCableId, onCancel, onDone, toast }) {
     <div style={{ background: 'var(--orange-light)', border: '1.5px solid var(--orange)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
       <input placeholder="Réf. touret (ex: TR-2050)" value={ref} onChange={(e) => setRef(e.target.value)} style={{ flex: 1, minWidth: 140, padding: 10, border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600 }} />
       <input type="number" min="1" placeholder="Longueur (m)" value={initiale} onChange={(e) => setInitiale(e.target.value)} style={{ width: 130, padding: 10, border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600 }} />
+      <EmplacementInput value={emplacement} onChange={setEmplacement} suggestions={suggestions} placeholder="📍 Emplacement (optionnel)" style={{ flex: 1, minWidth: 180 }} />
       <Button onClick={submit} disabled={saving} style={{ padding: '10px 14px', fontSize: 13 }}>{saving ? '...' : '+ Ajouter'}</Button>
       <Button variant="secondary" onClick={onCancel} style={{ padding: '10px 14px', fontSize: 13 }}>Annuler</Button>
     </div>
   );
 }
 
+// Input emplacement avec autocomplete des valeurs existantes
+function EmplacementInput({ value, onChange, suggestions = [], placeholder = '📍 Emplacement', style = {} }) {
+  const [open, setOpen] = useState(false);
+  const filtered = (suggestions || [])
+    .filter((s) => !value || s.toLowerCase().includes(value.toLowerCase()))
+    .filter((s) => s !== value)
+    .slice(0, 6);
+
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      <input
+        type="text"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        style={{ width: '100%', padding: 10, border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600, fontSize: 13, outline: 'none' }}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          right: 0,
+          background: 'white',
+          border: '1.5px solid var(--line)',
+          borderRadius: 'var(--radius-sm)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          zIndex: 100,
+          maxHeight: 200,
+          overflowY: 'auto',
+        }}>
+          {filtered.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onChange(s); setOpen(false); }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                padding: '8px 12px',
+                background: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+                color: 'var(--ink)',
+                fontFamily: 'inherit',
+                borderBottom: '1px solid var(--line-2)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }}
+            >
+              📍 {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== FORM VIEW (create / edit article) =====
-function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone, toast }) {
+function FormView({ mode, type, data, service, magasin, userId, emplacementSuggestions = [], onCancel, onDone, toast }) {
   const isCable = type === 'cable';
   const isEdit = mode === 'edit';
-  const [ref, setRef] = useState(isEdit ? (isCable ? data.ref_type : data.ref) : '');
+  const [ref, setRef] = useState(isEdit ? (isCable ? (data.ref_type || '') : (data.ref || '')) : '');
   const [nom, setNom] = useState(isEdit ? data.nom : '');
   const [seuil, setSeuil] = useState(isEdit ? data.seuil : (isCable ? 200 : 10));
   const [categorie, setCategorie] = useState(isEdit && isCable ? data.categorie : 'fibre');
   const [prixHt, setPrixHt] = useState(isEdit ? (data.prix_ht || 0) : 0);
   const [qty, setQty] = useState(isEdit && !isCable ? (data.qty || 0) : 0);
+  const [emplacement, setEmplacement] = useState(isEdit && !isCable ? (data.emplacement || '') : '');
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -457,13 +558,13 @@ function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone
       const refTrim = ref.trim();
       const payload = isCable
         ? { ref_type: refTrim, nom, categorie, seuil, prix_ht: prixHt }
-        : { ref: refTrim, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
+        : { ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
       const res = await fn(data.id, payload);
       setSaving(false);
       if (res.ok) {
         const updatedData = isCable
           ? { ...data, ref_type: refTrim || null, nom, categorie, seuil, prix_ht: prixHt }
-          : { ...data, ref: refTrim, nom, seuil, prix_ht: prixHt, qty: parseInt(qty) || 0 };
+          : { ...data, ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement: emplacement?.trim() || null, qty: parseInt(qty) || 0 };
         toast(`✓ ${nom} mis à jour`, 'success');
         onDone(updatedData);
       }
@@ -472,7 +573,7 @@ function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone
       const fn = isCable ? createCable : createConso;
       const payload = isCable
         ? { ref_type: ref.trim(), nom: nom.trim(), categorie, seuil, prix_ht: prixHt, service, magasin }
-        : { ref: ref.trim(), nom: nom.trim(), seuil, prix_ht: prixHt, service, magasin };
+        : { ref: ref.trim(), nom: nom.trim(), seuil, prix_ht: prixHt, emplacement, service, magasin };
       const res = await fn(payload);
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} créé`, 'success'); onDone(res.data); }
@@ -537,6 +638,16 @@ function FormView({ mode, type, data, service, magasin, userId, onCancel, onDone
             Optionnel. Utilisé pour calculer la valeur du stock et le coût des commandes.
           </div>
         </Field>
+
+        {!isCable && (
+          <Field label="📍 Emplacement">
+            <EmplacementInput value={emplacement} onChange={setEmplacement} suggestions={emplacementSuggestions} placeholder="Ex: Allée A - Étagère 2" />
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>
+              Optionnel. Aide les techniciens à trouver l'article dans le magasin.
+              {isCable ? '' : ' Tapez pour voir les emplacements déjà utilisés.'}
+            </div>
+          </Field>
+        )}
 
         <div style={{ display: 'flex', gap: 10, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
           <Button variant="secondary" onClick={onCancel} style={{ flex: 1 }}>Annuler</Button>

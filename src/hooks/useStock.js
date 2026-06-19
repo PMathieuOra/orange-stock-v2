@@ -26,7 +26,7 @@ export function useStock() {
       // On joint sur types_cable pour filtrer par service+magasin
       supabase
         .from('tourets')
-        .select('id, ref_touret, initiale, restante, type_cable_id, types_cable!inner(service_id, magasin_id, ref_type)')
+        .select('id, ref_touret, initiale, restante, emplacement, type_cable_id, types_cable!inner(service_id, magasin_id, ref_type)')
         .eq('types_cable.service_id', service)
         .eq('types_cable.magasin_id', magasin),
     ]);
@@ -46,6 +46,7 @@ export function useStock() {
         ref_touret: t.ref_touret,
         initiale: t.initiale,
         restante: t.restante,
+        emplacement: t.emplacement,
       });
     });
 
@@ -66,6 +67,101 @@ export function useStock() {
   }, [fetchStock]);
 
   return { items, loading, error, refetch: fetchStock };
+}
+
+// Hook : récupère les commandes en attente du scope actif (statut "en_attente" uniquement)
+// Renvoie une liste d'articles attendus (1 entrée par ligne de commande non encore reçue)
+export function usePendingOrders() {
+  const { service, magasin } = useSession();
+  const [pendingItems, setPendingItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchPending = useCallback(async () => {
+    if (!service || !magasin) return;
+    setLoading(true);
+
+    // 1. Récupérer les commandes en attente avec leurs lignes
+    const { data: commandes } = await supabase
+      .from('commandes')
+      .select('id, numero, type, date_creation, statut, commande_lignes(id, ref, qty_commandee, qty_recue)')
+      .eq('service_id', service)
+      .eq('magasin_id', magasin)
+      .eq('statut', 'en_attente')
+      .order('date_creation', { ascending: false });
+
+    if (!commandes || commandes.length === 0) {
+      setPendingItems([]);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Récupérer les noms et catégories des articles concernés
+    const consoRefs = [];
+    const cableRefs = [];
+    commandes.forEach((c) => {
+      (c.commande_lignes || []).forEach((l) => {
+        if (c.type === 'cable') cableRefs.push(l.ref);
+        else consoRefs.push(l.ref);
+      });
+    });
+
+    const [consosInfo, cablesInfo] = await Promise.all([
+      consoRefs.length > 0
+        ? supabase
+            .from('articles_conso')
+            .select('ref, nom')
+            .eq('service_id', service)
+            .eq('magasin_id', magasin)
+            .in('ref', consoRefs)
+        : Promise.resolve({ data: [] }),
+      cableRefs.length > 0
+        ? supabase
+            .from('types_cable')
+            .select('ref_type, nom, categorie')
+            .eq('service_id', service)
+            .eq('magasin_id', magasin)
+            .in('ref_type', cableRefs)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const consoMap = {};
+    (consosInfo.data || []).forEach((a) => { consoMap[a.ref] = { nom: a.nom }; });
+    const cableMap = {};
+    (cablesInfo.data || []).forEach((a) => { cableMap[a.ref_type] = { nom: a.nom, categorie: a.categorie }; });
+
+    // 3. Aplatir en liste d'articles attendus
+    const flat = [];
+    commandes.forEach((c) => {
+      (c.commande_lignes || []).forEach((l) => {
+        const reste = l.qty_commandee - l.qty_recue;
+        if (reste <= 0) return; // ligne déjà entièrement reçue
+        const info = c.type === 'cable' ? cableMap[l.ref] : consoMap[l.ref];
+        flat.push({
+          ligneId: l.id,
+          type: c.type, // 'conso' | 'cable'
+          ref: l.ref,
+          nom: info?.nom || null,
+          categorie: info?.categorie || null,
+          qty_attendue: reste,
+          unite: c.type === 'cable' ? 'm' : 'u',
+          commande: {
+            id: c.id,
+            numero: c.numero,
+            date_creation: c.date_creation,
+          },
+        });
+      });
+    });
+
+    setPendingItems(flat);
+    setLoading(false);
+  }, [service, magasin]);
+
+  useEffect(() => {
+    fetchPending();
+  }, [fetchPending]);
+
+  return { pendingItems, loading, refetch: fetchPending };
 }
 
 // Hook générique : récupère une table filtrée par scope

@@ -12,7 +12,7 @@ export async function fetchConsos(service, magasin) {
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }) {
+export async function createConso({ ref, nom, seuil, prix_ht, emplacement, service, magasin }) {
   const { data, error } = await supabase
     .from('articles_conso')
     .insert({
@@ -20,6 +20,7 @@ export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }
       nom,
       seuil: parseInt(seuil) || 0,
       prix_ht: parseFloat(prix_ht) || 0,
+      emplacement: emplacement?.trim() || null,
       qty: 0,
       service_id: service,
       magasin_id: magasin,
@@ -30,12 +31,13 @@ export async function createConso({ ref, nom, seuil, prix_ht, service, magasin }
   return { ok: !error, data, error: error?.message };
 }
 
-export async function updateConso(id, { ref, nom, seuil, prix_ht, qty, userId, oldQty }) {
+export async function updateConso(id, { ref, nom, seuil, prix_ht, emplacement, qty, userId, oldQty }) {
   const updates = {};
   if (ref !== undefined) updates.ref = ref;
   if (nom !== undefined) updates.nom = nom;
   if (seuil !== undefined) updates.seuil = parseInt(seuil) || 0;
   if (prix_ht !== undefined) updates.prix_ht = parseFloat(prix_ht) || 0;
+  if (emplacement !== undefined) updates.emplacement = emplacement?.trim() || null;
   if (qty !== undefined) updates.qty = Math.max(0, parseInt(qty) || 0);
 
   const { error } = await supabase.from('articles_conso').update(updates).eq('id', id);
@@ -140,12 +142,18 @@ export async function fetchTouretsForCable(typeCableId) {
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-export async function createTouret({ ref_touret, type_cable_id, initiale }) {
+export async function createTouret({ ref_touret, type_cable_id, initiale, emplacement }) {
   const init = parseInt(initiale);
   if (!init || init <= 0) return { ok: false, error: 'Longueur invalide' };
   const { data, error } = await supabase
     .from('tourets')
-    .insert({ ref_touret, type_cable_id, initiale: init, restante: init })
+    .insert({
+      ref_touret,
+      type_cable_id,
+      initiale: init,
+      restante: init,
+      emplacement: emplacement?.trim() || null,
+    })
     .select()
     .single();
   return { ok: !error, data, error: error?.message };
@@ -158,7 +166,38 @@ export async function updateTouretRestante(id, restante, initiale) {
   return { ok: !error, error: error?.message };
 }
 
+// Met à jour uniquement l'emplacement d'un touret
+export async function updateTouretEmplacement(id, emplacement) {
+  const { error } = await supabase
+    .from('tourets')
+    .update({ emplacement: emplacement?.trim() || null })
+    .eq('id', id);
+  return { ok: !error, error: error?.message };
+}
+
 export async function deleteTouret(id) {
   const { error } = await supabase.from('tourets').delete().eq('id', id);
   return { ok: !error, error: error?.message };
+}
+
+// Récupère la liste des emplacements distincts utilisés dans un scope (pour autocomplete)
+export async function fetchEmplacementsSuggestions(service, magasin) {
+  const set = new Set();
+  // Conso
+  const { data: c } = await supabase
+    .from('articles_conso')
+    .select('emplacement')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .not('emplacement', 'is', null);
+  (c || []).forEach((x) => { if (x.emplacement) set.add(x.emplacement); });
+  // Tourets (joints au type_cable pour filtrer par scope)
+  const { data: t } = await supabase
+    .from('tourets')
+    .select('emplacement, types_cable!inner(service_id, magasin_id)')
+    .eq('types_cable.service_id', service)
+    .eq('types_cable.magasin_id', magasin)
+    .not('emplacement', 'is', null);
+  (t || []).forEach((x) => { if (x.emplacement) set.add(x.emplacement); });
+  return Array.from(set).sort();
 }

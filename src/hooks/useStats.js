@@ -221,3 +221,128 @@ export async function fetchRuptures({ service, magasin }) {
     .order('nom');
   return data || [];
 }
+
+// Récupère l'évolution des commandes (nombre + coût total) sur la période
+// Granularité : week/month => par jour, quarter/year => par mois
+export async function fetchCommandesEvolution({ service, magasin, period }) {
+  const { start, end } = periodRange(period);
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  // Détermine la granularité
+  const useMonthly = period === 'quarter' || period === 'year';
+
+  // Récupérer les commandes du périmètre dans la période
+  const { data: commandes } = await supabase
+    .from('commandes')
+    .select('id, date_creation, type, commande_lignes(ref, qty_commandee)')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .gte('date_creation', start)
+    .lte('date_creation', end)
+    .order('date_creation');
+
+  if (!commandes || commandes.length === 0) {
+    return { buckets: buildBuckets(startDate, endDate, useMonthly), totalCout: 0, totalNb: 0, moyCout: 0 };
+  }
+
+  // Récupérer les prix des articles concernés (conso + câbles)
+  const consoRefs = [];
+  const cableRefs = [];
+  commandes.forEach((c) => {
+    (c.commande_lignes || []).forEach((l) => {
+      if (c.type === 'cable') cableRefs.push(l.ref);
+      else consoRefs.push(l.ref);
+    });
+  });
+
+  const [{ data: consos }, { data: cables }] = await Promise.all([
+    consoRefs.length > 0
+      ? supabase.from('articles_conso').select('ref, prix_ht').eq('service_id', service).eq('magasin_id', magasin).in('ref', consoRefs)
+      : Promise.resolve({ data: [] }),
+    cableRefs.length > 0
+      ? supabase.from('types_cable').select('ref_type, prix_ht').eq('service_id', service).eq('magasin_id', magasin).in('ref_type', cableRefs)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const consoPrix = {};
+  (consos || []).forEach((c) => { consoPrix[c.ref] = c.prix_ht || 0; });
+  const cablePrix = {};
+  (cables || []).forEach((c) => { cablePrix[c.ref_type] = c.prix_ht || 0; });
+
+  // Calculer le coût de chaque commande
+  function coutCommande(cmd) {
+    return (cmd.commande_lignes || []).reduce((s, l) => {
+      const prix = cmd.type === 'cable' ? (cablePrix[l.ref] || 0) : (consoPrix[l.ref] || 0);
+      return s + prix * l.qty_commandee;
+    }, 0);
+  }
+
+  // Initialiser les buckets
+  const buckets = buildBuckets(startDate, endDate, useMonthly);
+
+  // Remplir les buckets
+  let totalCout = 0;
+  commandes.forEach((c) => {
+    const cout = coutCommande(c);
+    totalCout += cout;
+    const d = new Date(c.date_creation);
+    const key = bucketKey(d, useMonthly);
+    const bucket = buckets.find((b) => b.key === key);
+    if (bucket) {
+      bucket.nb += 1;
+      bucket.cout += cout;
+    }
+  });
+
+  const totalNb = commandes.length;
+  const moyCout = totalNb > 0 ? totalCout / totalNb : 0;
+
+  return { buckets, totalCout, totalNb, moyCout };
+}
+
+// Construit les buckets sur la période donnée
+function buildBuckets(startDate, endDate, monthly) {
+  const buckets = [];
+  if (monthly) {
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const last = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (cur <= last) {
+      const yyyy = cur.getFullYear();
+      const mm = String(cur.getMonth() + 1).padStart(2, '0');
+      buckets.push({
+        key: `${yyyy}-${mm}`,
+        label: cur.toLocaleDateString('fr-FR', { month: 'short' }),
+        year: yyyy,
+        nb: 0,
+        cout: 0,
+      });
+      cur.setMonth(cur.getMonth() + 1);
+    }
+  } else {
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const last = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    while (cur <= last) {
+      const yyyy = cur.getFullYear();
+      const mm = String(cur.getMonth() + 1).padStart(2, '0');
+      const dd = String(cur.getDate()).padStart(2, '0');
+      buckets.push({
+        key: `${yyyy}-${mm}-${dd}`,
+        label: cur.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
+        year: yyyy,
+        nb: 0,
+        cout: 0,
+      });
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  return buckets;
+}
+
+function bucketKey(d, monthly) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  if (monthly) return `${yyyy}-${mm}`;
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}

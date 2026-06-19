@@ -3,21 +3,21 @@ import { supabase } from '../lib/supabase';
 
 // ===== TEMPLATE CONSO =====
 
-const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty', 'prix_ht'];
+const TEMPLATE_HEADERS = ['ref', 'nom', 'seuil', 'qty', 'prix_ht', 'emplacement'];
 const TEMPLATE_EXAMPLES = [
-  ['PRJ45-C6', 'Patch RJ45 Cat6 1m', 10, 42, 0.85],
-  ['F-OM4-LC2', 'Jarretière fibre OM4 LC-LC 2m', 15, 12, 12.50],
-  ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4, 8.20],
+  ['PRJ45-C6', 'Patch RJ45 Cat6 1m', 10, 42, 0.85, 'Allée A - Étagère 2'],
+  ['F-OM4-LC2', 'Jarretière fibre OM4 LC-LC 2m', 15, 12, 12.50, 'Allée B - Étagère 1'],
+  ['EMB-RJ45', 'Embout RJ45 Cat6 (lot 50)', 5, 4, 8.20, ''],
 ];
 
 // ===== TEMPLATE CABLES =====
 
-const CABLE_TEMPLATE_HEADERS = ['ref_touret', 'nom_type', 'categorie', 'longueur', 'ref_type', 'seuil', 'prix_ht'];
+const CABLE_TEMPLATE_HEADERS = ['ref_touret', 'nom_type', 'categorie', 'longueur', 'ref_type', 'seuil', 'prix_ht', 'emplacement'];
 const CABLE_TEMPLATE_EXAMPLES = [
-  ['AC-2024-001', 'L1041 12FO', 'fibre', 1000, '3760024112345', 500, 1.20],
-  ['AC-2024-002', 'L1041 12FO', 'fibre', 850, '', 500, 1.20],
-  ['AC-2024-003', 'L1041 12FO', 'fibre', 1000, '', 500, 1.20],
-  ['AC-CU-101', '88 56 6', 'cuivre', 305, '', 200, 0.45],
+  ['AC-2024-001', 'L1041 12FO', 'fibre', 1000, '3760024112345', 500, 1.20, 'Zone A1'],
+  ['AC-2024-002', 'L1041 12FO', 'fibre', 850, '', 500, 1.20, 'Zone A2'],
+  ['AC-2024-003', 'L1041 12FO', 'fibre', 1000, '', 500, 1.20, ''],
+  ['AC-CU-101', '88 56 6', 'cuivre', 305, '', 200, 0.45, 'Zone B1'],
 ];
 
 // Génère un fichier Excel modèle pour les conso et déclenche le téléchargement
@@ -34,7 +34,7 @@ export function downloadConsoTemplate(format = 'xlsx') {
 
   // Excel
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLES]);
-  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }, { wch: 12 }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 22 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Consommables');
 
@@ -48,14 +48,16 @@ export function downloadConsoTemplate(format = 'xlsx') {
     ['seuil', 'Seuil d\'alerte critique (entier ≥ 0)', 'Oui'],
     ['qty', 'Quantité initiale en stock (entier ≥ 0)', 'Oui'],
     ['prix_ht', 'Prix unitaire HT en euros (ex: 8.50). 0 si inconnu', 'Non'],
+    ['emplacement', 'Localisation physique dans le magasin (ex: "Allée A - Étagère 2")', 'Non'],
     [],
     ['Conseils :'],
     ['- Les lignes avec une ref déjà existante seront ignorées'],
     ['- Le service et le magasin de destination sont définis par les pastilles dans l\'app au moment de l\'import'],
     ['- Vous pouvez supprimer les lignes d\'exemple avant d\'importer'],
     ['- Pour le prix : utilisez le point comme séparateur décimal (8.50 et non 8,50)'],
+    ['- L\'emplacement est libre : utilisez le même libellé pour des articles au même endroit'],
   ]);
-  help['!cols'] = [{ wch: 14 }, { wch: 50 }, { wch: 12 }];
+  help['!cols'] = [{ wch: 14 }, { wch: 55 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, help, 'Aide');
 
   const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -79,7 +81,7 @@ export function downloadCableTemplate(format = 'xlsx') {
   }
 
   const ws = XLSX.utils.aoa_to_sheet([CABLE_TEMPLATE_HEADERS, ...CABLE_TEMPLATE_EXAMPLES]);
-  ws['!cols'] = [{ wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 8 }, { wch: 10 }];
+  ws['!cols'] = [{ wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 8 }, { wch: 10 }, { wch: 22 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Tourets');
 
@@ -99,11 +101,13 @@ export function downloadCableTemplate(format = 'xlsx') {
     ['ref_type', 'EAN du produit pour les commandes (peut être vide)', 'Non'],
     ['seuil', 'Seuil d\'alerte du type de câble en mètres (somme des tourets)', 'Non (0)'],
     ['prix_ht', 'Prix au mètre HT en euros (ex: 1.20)', 'Non (0)'],
+    ['emplacement', 'Localisation physique du touret dans le magasin (ex: "Zone A1")', 'Non'],
     [],
     ['Conseils :'],
     ['- Les tourets avec une ref_touret déjà existante seront ignorés'],
     ['- Si une typologie (nom_type + categorie) existe déjà, les tourets y sont rattachés'],
     ['- L\'EAN peut être vide ; il pourra être renseigné plus tard dans la fiche article'],
+    ['- Chaque touret peut avoir son propre emplacement'],
     ['- Le service et le magasin sont définis par les pastilles dans l\'app'],
     ['- Pour les valeurs décimales (prix), utilisez le point (1.20 et non 1,20)'],
     ['- Si la catégorie est mal saisie, la ligne sera ignorée'],
@@ -159,6 +163,7 @@ export async function parseFile(file) {
       seuil:   ['seuil', 'seuilalerte', 'alerte', 'min', 'minimum', 'stockmin'],
       qty:     ['qty', 'quantite', 'qte', 'quantity', 'stock'],
       prix_ht: ['prix_ht', 'prixht', 'prix', 'prixunitaire', 'tarif', 'pu', 'puht', 'cout', 'price'],
+      emplacement: ['emplacement', 'lieu', 'localisation', 'location', 'zone', 'allee', 'place', 'position', 'rangement'],
     };
 
     function findCol(row, aliases) {
@@ -182,6 +187,7 @@ export async function parseFile(file) {
           seuil: findCol(row, COL_ALIASES.seuil),
           qty: findCol(row, COL_ALIASES.qty),
           prix_ht: findCol(row, COL_ALIASES.prix_ht), // -1 si absente = OK
+          emplacement: findCol(row, COL_ALIASES.emplacement), // -1 si absente = OK
         };
         break;
       }
@@ -203,6 +209,7 @@ export async function parseFile(file) {
       const seuilRaw = headerMap.seuil >= 0 ? row[headerMap.seuil] : 0;
       const qtyRaw = headerMap.qty >= 0 ? row[headerMap.qty] : 0;
       const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
+      const emplacement = headerMap.emplacement >= 0 ? String(row[headerMap.emplacement] ?? '').trim() : '';
 
       // Ligne entièrement vide → skip silencieux
       if (!ref && !nom) continue;
@@ -242,7 +249,7 @@ export async function parseFile(file) {
         if (!isNaN(p) && p >= 0) prix_ht = p;
       }
 
-      items.push({ ref, nom, seuil, qty, prix_ht });
+      items.push({ ref, nom, seuil, qty, prix_ht, emplacement: emplacement || null });
     }
 
     return { ok: true, items, errors };
@@ -297,6 +304,7 @@ export async function importConsos({ items, service, magasin }) {
         seuil: it.seuil,
         qty: it.qty,
         prix_ht: it.prix_ht || 0,
+        emplacement: it.emplacement || null,
         service_id: service,
         magasin_id: magasin,
         actif: true,
@@ -374,6 +382,7 @@ export async function parseCableFile(file) {
       longueur: ['longueur', 'longinitial', 'longueurinitiale', 'initiale', 'length', 'metre', 'metres', 'm'],
       seuil: ['seuil', 'seuilalerte', 'alerte', 'min', 'minimum'],
       prix_ht: ['prix_ht', 'prixht', 'prix', 'prixunitaire', 'prixmetre', 'tarif', 'pu', 'puht', 'cout'],
+      emplacement: ['emplacement', 'lieu', 'localisation', 'location', 'zone', 'allee', 'place', 'position', 'rangement'],
     };
 
     function findCol(row, aliases) {
@@ -399,6 +408,7 @@ export async function parseCableFile(file) {
           longueur: findCol(row, COL_ALIASES.longueur),
           seuil: findCol(row, COL_ALIASES.seuil),
           prix_ht: findCol(row, COL_ALIASES.prix_ht),
+          emplacement: findCol(row, COL_ALIASES.emplacement), // -1 si absente = OK
         };
         break;
       }
@@ -422,6 +432,7 @@ export async function parseCableFile(file) {
       const longueurRaw = headerMap.longueur >= 0 ? row[headerMap.longueur] : '';
       const seuilRaw = headerMap.seuil >= 0 ? row[headerMap.seuil] : 0;
       const prixRaw = headerMap.prix_ht >= 0 ? row[headerMap.prix_ht] : '';
+      const emplacement = headerMap.emplacement >= 0 ? String(row[headerMap.emplacement] ?? '').trim() : '';
 
       // Ligne entièrement vide → skip silencieux
       if (!ref_touret && !nom_type) continue;
@@ -467,7 +478,7 @@ export async function parseCableFile(file) {
       // ref_type: null si vide (pas de string vide en base)
       const refTypeValue = ref_type || null;
 
-      items.push({ ref_touret, ref_type: refTypeValue, nom_type, categorie, longueur, seuil, prix_ht });
+      items.push({ ref_touret, ref_type: refTypeValue, nom_type, categorie, longueur, seuil, prix_ht, emplacement: emplacement || null });
     }
 
     return { ok: true, items, errors };
@@ -610,6 +621,7 @@ export async function importCables({ items, service, magasin }) {
         type_cable_id: typeCableId,
         initiale: it.longueur,
         restante: it.longueur,
+        emplacement: it.emplacement || null,
       });
     }
   }
