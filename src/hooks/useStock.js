@@ -69,7 +69,7 @@ export function useStock() {
   return { items, loading, error, refetch: fetchStock };
 }
 
-// Hook : récupère les commandes en attente du scope actif (statut "en_attente" uniquement)
+// Hook : récupère les commandes "en cours" (pas encore entièrement reçues) du scope actif
 // Renvoie une liste d'articles attendus (1 entrée par ligne de commande non encore reçue)
 export function usePendingOrders() {
   const { service, magasin } = useSession();
@@ -80,22 +80,50 @@ export function usePendingOrders() {
     if (!service || !magasin) return;
     setLoading(true);
 
-    // 1. Récupérer les commandes en attente avec leurs lignes
-    const { data: commandes } = await supabase
+    // 1. Récupérer les commandes "en cours" (non entièrement reçues)
+    const { data: commandes, error: errCmd } = await supabase
       .from('commandes')
-      .select('id, numero, type, date_creation, statut, commande_lignes(id, ref, qty_commandee, qty_recue)')
+      .select('id, numero, type, date_creation, statut')
       .eq('service_id', service)
       .eq('magasin_id', magasin)
-      .eq('statut', 'en_attente')
+      .eq('statut', 'en_cours')
       .order('date_creation', { ascending: false });
 
+    if (errCmd) {
+      console.error('Erreur fetch commandes :', errCmd);
+      setPendingItems([]);
+      setLoading(false);
+      return;
+    }
     if (!commandes || commandes.length === 0) {
       setPendingItems([]);
       setLoading(false);
       return;
     }
 
-    // 2. Récupérer les noms et catégories des articles concernés
+    // 2. Récupérer les lignes de ces commandes (en une requête séparée pour éviter les soucis d'embed)
+    const cmdIds = commandes.map((c) => c.id);
+    const { data: lignes, error: errLignes } = await supabase
+      .from('commande_lignes')
+      .select('id, commande_id, ref, qty_commandee, qty_recue')
+      .in('commande_id', cmdIds);
+
+    if (errLignes) {
+      console.error('Erreur fetch lignes :', errLignes);
+      setPendingItems([]);
+      setLoading(false);
+      return;
+    }
+
+    // Grouper les lignes par commande
+    const lignesByCmd = {};
+    (lignes || []).forEach((l) => {
+      if (!lignesByCmd[l.commande_id]) lignesByCmd[l.commande_id] = [];
+      lignesByCmd[l.commande_id].push(l);
+    });
+    commandes.forEach((c) => { c.commande_lignes = lignesByCmd[c.id] || []; });
+
+    // 3. Récupérer les noms et catégories des articles concernés
     const consoRefs = [];
     const cableRefs = [];
     commandes.forEach((c) => {

@@ -343,12 +343,34 @@ export default function Sortie() {
 function TouretPicker({ item, tourets, loading, onClose, onAdd }) {
   const [selectedId, setSelectedId] = useState(null);
   const [qty, setQty] = useState('');
+  const [mode, setMode] = useState('pris'); // 'pris' | 'restant'
 
   const selected = tourets.find((t) => t.id === selectedId);
 
+  // Calcule la qty effectivement prise selon le mode
+  const qtyNum = parseInt(qty);
+  let qtyPrise = 0;
+  let qtyRestanteAfter = null;
+  let inputError = '';
+  if (selected && !isNaN(qtyNum) && qtyNum >= 0) {
+    if (mode === 'pris') {
+      qtyPrise = qtyNum;
+      qtyRestanteAfter = selected.restante - qtyNum;
+      if (qtyNum > selected.restante) inputError = `Maximum ${selected.restante}m sur ce touret`;
+      else if (qtyNum <= 0) inputError = 'Quantité doit être > 0';
+    } else {
+      // mode 'restant' : qty saisie = ce qui restera
+      qtyRestanteAfter = qtyNum;
+      qtyPrise = selected.restante - qtyNum;
+      if (qtyNum > selected.restante) inputError = `Le restant ne peut pas dépasser ${selected.restante}m`;
+      else if (qtyNum < 0) inputError = 'Quantité invalide';
+      else if (qtyPrise <= 0) inputError = 'Aucune longueur prise';
+    }
+  }
+
   function handleAdd() {
-    if (!selected) return;
-    onAdd(selected, parseInt(qty) || 0);
+    if (!selected || qtyPrise <= 0 || inputError) return;
+    onAdd(selected, qtyPrise);
   }
 
   return (
@@ -418,22 +440,71 @@ function TouretPicker({ item, tourets, loading, onClose, onAdd }) {
 
               {selected && (
                 <div style={{ marginTop: 18, padding: 16, background: 'var(--orange-light)', border: '1.5px solid var(--orange)', borderRadius: 'var(--radius)' }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--orange-dark)', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--orange-dark)', marginBottom: 10 }}>
                     Touret sélectionné : <span className="mono">{selected.ref_touret}</span>
                   </div>
+
+                  {/* Toggle Pris / Restant */}
+                  <div style={{ display: 'flex', background: 'white', borderRadius: '100px', padding: 3, border: '1.5px solid var(--orange)', marginBottom: 10 }}>
+                    {[
+                      { id: 'pris', label: 'Longueur prise', sub: 'm utilisés' },
+                      { id: 'restant', label: 'Reste sur touret', sub: 'm restant' },
+                    ].map((m) => {
+                      const active = mode === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => { setMode(m.id); setQty(''); }}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            background: active ? 'var(--orange)' : 'transparent',
+                            color: active ? 'white' : 'var(--ink-3)',
+                            border: 'none',
+                            borderRadius: '100px',
+                            fontWeight: 700,
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       max={selected.restante}
                       value={qty}
                       onChange={(e) => setQty(e.target.value)}
-                      placeholder={`Quantité en mètres (max ${selected.restante})`}
+                      placeholder={mode === 'pris' ? `Mètres pris (max ${selected.restante})` : `Reste après sortie (de 0 à ${selected.restante})`}
                       autoFocus
-                      style={{ flex: 1, padding: 12, border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, outline: 'none' }}
+                      style={{ flex: 1, padding: 12, border: '1.5px solid ' + (inputError ? 'var(--red)' : 'var(--line)'), borderRadius: 'var(--radius)', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, outline: 'none' }}
                     />
-                    <Button onClick={handleAdd} disabled={!qty || parseInt(qty) <= 0}>+ Ajouter</Button>
+                    <Button onClick={handleAdd} disabled={!qty || qtyPrise <= 0 || !!inputError}>+ Ajouter</Button>
                   </div>
+
+                  {/* Feedback live */}
+                  {qty && !inputError && qtyPrise > 0 && (
+                    <div style={{ marginTop: 10, padding: '8px 12px', background: 'white', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>
+                        ✂️ <span className="mono" style={{ fontWeight: 800, color: 'var(--orange-dark)' }}>{qtyPrise}m</span> seront sortis
+                      </span>
+                      <span>
+                        Restera : <span className="mono" style={{ fontWeight: 800, color: 'var(--ink)' }}>{qtyRestanteAfter}m</span> / {selected.initiale}m
+                      </span>
+                    </div>
+                  )}
+                  {inputError && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)', fontWeight: 700 }}>
+                      ⚠ {inputError}
+                    </div>
+                  )}
                 </div>
               )}
             </>
