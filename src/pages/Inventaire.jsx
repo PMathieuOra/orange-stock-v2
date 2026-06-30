@@ -18,7 +18,7 @@ import { fmtRelative, fmtDate } from '../lib/helpers';
 
 export default function Inventaire() {
   const navigate = useNavigate();
-  const { currentUser, isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { service, magasin } = useSession();
   const { toast } = useToast();
 
@@ -31,17 +31,14 @@ export default function Inventaire() {
 
   const week = useMemo(() => getCurrentWeek(), []);
 
-  const userId = currentUser?.id;
+  const userId = user?.id;
   const fetchingRef = useRef(false);
   const lastScopeRef = useRef('');
 
   useEffect(() => {
     const scopeKey = `${service}|${magasin}|${userId}`;
-    // Skip si scope incomplet
     if (!service || !magasin || !userId) return;
-    // Skip si on a déjà fetché ce scope
     if (lastScopeRef.current === scopeKey) return;
-    // Skip si un fetch est déjà en cours
     if (fetchingRef.current) return;
 
     fetchingRef.current = true;
@@ -64,7 +61,7 @@ export default function Inventaire() {
         setRegulations(regs.data);
         setRegulStats(stats);
       } catch (err) {
-        console.error('Erreur fetch inventaire :', err);
+        console.error('[Inventaire] Erreur :', err);
         toast('Erreur : ' + err.message, 'error');
       } finally {
         setLoading(false);
