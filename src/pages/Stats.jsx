@@ -193,21 +193,44 @@ export default function Stats() {
 
             {tab === 'journal' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {mouvements.slice(0, 100).map((m) => (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{m.nom || m.ref}</div>
-                      <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-                        <Badge color={m.type === 'sortie' ? 'orange' : m.type === 'entree' ? 'green' : 'gray'}>{m.type}</Badge>
-                        {' '}<span className="mono">{m.ref}</span> · {m.users ? displayName(m.users) : 'Système'}
+                {mouvements.slice(0, 100).map((m) => {
+                  // Extraire le n° de touret depuis la note (format : "Touret XXX : 1000m → 750m")
+                  const touretMatch = m.note && m.note.match(/Touret\s+([^\s:]+)\s*:/i);
+                  const touretRef = touretMatch ? touretMatch[1] : null;
+                  // Le reste de la note (si elle commence par autre chose que "Touret")
+                  const userNote = m.note && !m.note.startsWith('Touret ') && !m.note.startsWith('Touret\t')
+                    ? m.note.split(' | Touret ')[0]
+                    : null;
+                  return (
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{m.nom || m.ref}</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Badge color={m.type === 'sortie' ? 'orange' : m.type === 'entree' ? 'green' : 'gray'}>{m.type}</Badge>
+                          <span className="mono">{m.ref}</span>
+                          {touretRef && (
+                            <>
+                              <span>·</span>
+                              <span style={{ color: 'var(--blue)', fontWeight: 700 }}>🎰 <span className="mono">{touretRef}</span></span>
+                            </>
+                          )}
+                          <span>·</span>
+                          <span>{m.users ? displayName(m.users) : 'Système'}</span>
+                          {userNote && (
+                            <>
+                              <span>·</span>
+                              <span style={{ fontStyle: 'italic' }}>« {userNote} »</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div className="mono" style={{ fontWeight: 800, color: m.qty > 0 ? 'var(--green)' : 'var(--orange-dark)' }}>{m.qty > 0 ? '+' : ''}{m.qty}</div>
+                        <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>{fmtRelative(m.created_at)}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="mono" style={{ fontWeight: 800, color: m.qty > 0 ? 'var(--green)' : 'var(--orange-dark)' }}>{m.qty > 0 ? '+' : ''}{m.qty}</div>
-                      <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>{fmtRelative(m.created_at)}</div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>

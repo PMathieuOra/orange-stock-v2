@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,26 +31,73 @@ export default function Inventaire() {
 
   const week = useMemo(() => getCurrentWeek(), []);
 
-  const fetchData = useCallback(async () => {
-    if (!service || !magasin || !currentUser) return;
-    setLoading(true);
-    const [inv, regs, stats] = await Promise.all([
-      getOrCreateWeeklyInventory({ service, magasin, userId: currentUser.id, nbItems: 5 }),
-      fetchRegularisations({ service, magasin, limit: 100 }),
-      fetchRegulStats({ service, magasin }),
-    ]);
-    if (inv.ok) {
-      setInventaire(inv.inventaire);
-      setChecks(inv.checks);
-    } else {
-      toast('Erreur inventaire : ' + inv.error, 'error');
-    }
-    setRegulations(regs.data);
-    setRegulStats(stats);
-    setLoading(false);
-  }, [service, magasin, currentUser, toast]);
+  const userId = currentUser?.id;
+  const fetchingRef = useRef(false);
+  const lastScopeRef = useRef('');
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const scopeKey = `${service}|${magasin}|${userId}`;
+    // Skip si scope incomplet
+    if (!service || !magasin || !userId) return;
+    // Skip si on a déjà fetché ce scope
+    if (lastScopeRef.current === scopeKey) return;
+    // Skip si un fetch est déjà en cours
+    if (fetchingRef.current) return;
+
+    fetchingRef.current = true;
+    lastScopeRef.current = scopeKey;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const [inv, regs, stats] = await Promise.all([
+          getOrCreateWeeklyInventory({ service, magasin, userId, nbItems: 5 }),
+          fetchRegularisations({ service, magasin, limit: 100 }),
+          fetchRegulStats({ service, magasin }),
+        ]);
+        if (inv.ok) {
+          setInventaire(inv.inventaire);
+          setChecks(inv.checks);
+        } else {
+          toast('Erreur inventaire : ' + inv.error, 'error');
+        }
+        setRegulations(regs.data);
+        setRegulStats(stats);
+      } catch (err) {
+        console.error('Erreur fetch inventaire :', err);
+        toast('Erreur : ' + err.message, 'error');
+      } finally {
+        setLoading(false);
+        fetchingRef.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [service, magasin, userId]);
+
+  // Fonction pour rafraîchir manuellement (après une régul / validation)
+  const refresh = useCallback(async () => {
+    if (!service || !magasin || !userId) return;
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    setLoading(true);
+    try {
+      const [inv, regs, stats] = await Promise.all([
+        getOrCreateWeeklyInventory({ service, magasin, userId, nbItems: 5 }),
+        fetchRegularisations({ service, magasin, limit: 100 }),
+        fetchRegulStats({ service, magasin }),
+      ]);
+      if (inv.ok) {
+        setInventaire(inv.inventaire);
+        setChecks(inv.checks);
+      }
+      setRegulations(regs.data);
+      setRegulStats(stats);
+    } finally {
+      setLoading(false);
+      fetchingRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [service, magasin, userId]);
 
   if (!isAdmin) {
     return <Layout brandTitle="Inventaire" brandSub="Administration"><Denied /></Layout>;
@@ -105,8 +152,8 @@ export default function Inventaire() {
                 inventaire={inventaire}
                 checks={checks}
                 week={week}
-                userId={currentUser.id}
-                onRefresh={fetchData}
+                userId={userId}
+                onRefresh={refresh}
                 toast={toast}
               />
             )}
@@ -115,8 +162,8 @@ export default function Inventaire() {
               <RegulTab
                 service={service}
                 magasin={magasin}
-                userId={currentUser.id}
-                onDone={fetchData}
+                userId={userId}
+                onDone={refresh}
                 toast={toast}
               />
             )}
