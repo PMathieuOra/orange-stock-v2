@@ -68,7 +68,7 @@ function Icon({ name, size = 22 }) {
   }
 }
 
-export default function Layout({ children, brandTitle = 'Stock', brandSub = 'Orange' }) {
+export default function Layout({ children, brandTitle = "Stock", brandSub = "Orange", allowMultiService = false }) {
   const { user, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -146,7 +146,7 @@ export default function Layout({ children, brandTitle = 'Stock', brandSub = 'Ora
         {/* Session selectors + user */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="header-selectors" style={{ display: 'none' }}>
-            <SessionSelectors />
+            <SessionSelectors allowMultiService={allowMultiService} />
           </div>
           <button
             onClick={() => {
@@ -217,7 +217,7 @@ export default function Layout({ children, brandTitle = 'Stock', brandSub = 'Ora
           padding: '10px 20px 0',
         }}
       >
-        <SessionSelectors />
+        <SessionSelectors allowMultiService={allowMultiService} />
       </div>
 
       {/* MAIN CONTENT */}

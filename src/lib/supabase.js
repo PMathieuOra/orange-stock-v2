@@ -16,6 +16,7 @@ export const SERVICES_REF = [
   { id: 'boucle_locale', nom: 'Boucle Locale', icon: '🔌', couleur: '#2563EB' },
   { id: 'structurant', nom: 'Réseaux Structurant', icon: '🌐', couleur: '#FF7900' },
   { id: 'client', nom: 'Client', icon: '👥', couleur: '#7C3AED' },
+  { id: 'intervention', nom: 'Intervention', icon: '🚧', couleur: '#DC2626' },
 ];
 
 export function getServiceInfo(id) {

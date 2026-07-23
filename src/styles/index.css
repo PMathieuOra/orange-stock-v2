@@ -91,3 +91,8 @@ html, body {
 /* Scrollbar hide utility */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes critical-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(230,57,70,0.35); }
+  50% { box-shadow: 0 4px 22px rgba(230,57,70,0.6), 0 0 0 4px rgba(230,57,70,0.15); }
+}

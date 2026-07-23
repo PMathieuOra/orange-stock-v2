@@ -156,7 +156,7 @@ export default function Magasins() {
                 return (
                   <button key={m.id} onClick={() => { setDetail(m); setView('detail'); }} style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-lg)', padding: 18, opacity: m.actif ? 1 : 0.6, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                      <div style={{ width: 44, height: 44, borderRadius: 'var(--radius)', background: 'linear-gradient(135deg, #00A86B, #34D399)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🏠</div>
+                      <div style={{ width: 44, height: 44, borderRadius: 'var(--radius)', background: 'linear-gradient(135deg, #00A86B, #34D399)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{m.icon || '🏠'}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em' }}>{m.nom}</div>
                         <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>{m.id}</div>
@@ -187,6 +187,7 @@ function MagasinForm({ mode, data, existingIds, onCancel, onDone, toast }) {
   const isEdit = mode === 'edit';
   const [nom, setNom] = useState(isEdit ? data.nom : '');
   const [id, setId] = useState(isEdit ? data.id : '');
+  const [icon, setIcon] = useState(isEdit ? (data.icon || '🏪') : '🏪');
   const [idTouched, setIdTouched] = useState(false);
   const [services, setServices] = useState(isEdit ? (data.magasins_services || []).map((s) => s.service_id) : []);
   const [saving, setSaving] = useState(false);
@@ -211,17 +212,19 @@ function MagasinForm({ mode, data, existingIds, onCancel, onDone, toast }) {
 
     setSaving(true);
     if (isEdit) {
-      const res = await updateMagasin(data.id, { nom, services });
+      const res = await updateMagasin(data.id, { nom, services, icon });
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} mis à jour`, 'success'); onDone(); }
       else toast('Erreur : ' + res.error, 'error');
     } else {
-      const res = await createMagasin({ id, nom, services });
+      const res = await createMagasin({ id, nom, services, icon });
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} créé`, 'success'); onDone(); }
-      else toast('Erreur : ' + res.error, 'error');
+      else toast('❌ ' + res.error, 'error');
     }
   }
+
+  const iconOptions = ['🏠', '🏬', '🏪', '🏭', '🏢', '📦', '🚚', '⛑️', '🔧', '🛠️'];
 
   return (
     <Layout brandTitle={isEdit ? 'Modifier' : 'Nouveau'} brandSub="Magasin">
@@ -246,6 +249,28 @@ function MagasinForm({ mode, data, existingIds, onCancel, onDone, toast }) {
           />
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4, fontWeight: 600 }}>
             {isEdit ? "L'identifiant ne peut pas être modifié." : 'Auto-généré depuis le nom. Modifiable si besoin. Lettres min, chiffres, _ seulement.'}
+          </div>
+        </Field>
+
+        <Field label="Icône">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {iconOptions.map((i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setIcon(i)}
+                style={{
+                  width: 44,
+                  height: 44,
+                  fontSize: 22,
+                  background: icon === i ? 'var(--orange-light)' : 'var(--bg)',
+                  border: `1.5px solid ${icon === i ? 'var(--orange)' : 'var(--line)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >{i}</button>
+            ))}
           </div>
         </Field>
 

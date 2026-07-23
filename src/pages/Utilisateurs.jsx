@@ -4,12 +4,13 @@ import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { SERVICES_REF, getServiceInfo } from '../lib/supabase';
-import { MAGASINS_REF, getMagasinInfo } from '../components/SessionSelectors';
+import { getMagasinInfo as getStaticMagasinInfo } from '../components/SessionSelectors';
 import { Denied, PageLoader, Empty, Badge, Button } from '../components/ui';
 import { initials, displayName } from '../lib/helpers';
 import {
   fetchUsers, createUser, updateUser, toggleUserActif, resetPassword, deleteUser,
 } from '../hooks/useUsers';
+import { fetchMagasins } from '../hooks/useMagasins';
 
 export default function Utilisateurs() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -18,6 +19,7 @@ export default function Utilisateurs() {
 
   const [view, setView] = useState('list'); // list | detail | form
   const [users, setUsers] = useState([]);
+  const [magasins, setMagasins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all'); // all | actif | inactif
@@ -26,10 +28,21 @@ export default function Utilisateurs() {
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
-    const res = await fetchUsers();
-    setUsers(res.data);
+    const [usersRes, magsRes] = await Promise.all([
+      fetchUsers(),
+      fetchMagasins(),
+    ]);
+    setUsers(usersRes.data);
+    setMagasins((magsRes.data || []).filter((m) => m.actif !== false));
     setLoading(false);
   }, []);
+
+  // Helper : info magasin (dynamique par ID)
+  const getMagasinInfo = useCallback((id) => {
+    const found = magasins.find((m) => m.id === id);
+    if (found) return { id: found.id, nom: found.nom, icon: found.icon || '🏪' };
+    return getStaticMagasinInfo(id);
+  }, [magasins]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
@@ -44,6 +57,7 @@ export default function Utilisateurs() {
         mode={form.mode}
         data={form.data}
         allUsers={users}
+        availableMagasins={magasins}
         onCancel={() => { setView(detail ? 'detail' : 'list'); setForm(null); }}
         onDone={async () => {
           setForm(null);
@@ -209,7 +223,7 @@ export default function Utilisateurs() {
 }
 
 // ===== USER FORM =====
-function UserForm({ mode, data, allUsers, onCancel, onDone, toast }) {
+function UserForm({ mode, data, allUsers, availableMagasins = [], onCancel, onDone, toast }) {
   const isEdit = mode === 'edit';
   const [prenom, setPrenom] = useState(isEdit ? data.prenom : '');
   const [initiale, setInitiale] = useState(isEdit ? data.nom_initiale : '');
@@ -291,11 +305,11 @@ function UserForm({ mode, data, allUsers, onCancel, onDone, toast }) {
           </div>
         </Field>
 
-        <Field label={`Magasins autorisés (${magasins.length}/${MAGASINS_REF.length})`} required>
+        <Field label={`Magasins autorisés (${magasins.length}/${availableMagasins.length})`} required>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {MAGASINS_REF.map((m) => (
+            {availableMagasins.map((m) => (
               <CheckRow key={m.id} checked={magasins.includes(m.id)} onClick={() => toggleMagasin(m.id)}>
-                <span style={{ fontSize: 18 }}>{m.icon}</span>
+                <span style={{ fontSize: 18 }}>{m.icon || '🏪'}</span>
                 <span style={{ flex: 1, fontWeight: 700 }}>{m.nom}</span>
               </CheckRow>
             ))}

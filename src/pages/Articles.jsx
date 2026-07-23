@@ -15,6 +15,9 @@ import {
   fetchEmplacementsSuggestions,
 } from '../hooks/useArticles';
 import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables } from '../hooks/useImport';
+import { transferTouret } from '../hooks/useTransfert';
+import { generateTouretLabels, downloadPdf, LABEL_FORMATS } from '../lib/labels';
+import { fetchMagasins } from '../hooks/useMagasins';
 
 export default function Articles() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -86,8 +89,11 @@ export default function Articles() {
       <DetailView
         type={detail.type}
         item={detail.item}
+        activeService={activeService}
         activeMagasin={activeMagasin}
         emplacementSuggestions={emplacementSuggestions}
+        isAdmin={isAdmin}
+        userId={currentUser?.id}
         onBack={() => { setView('list'); fetchData(); }}
         onEdit={() => { setForm({ mode: 'edit', type: detail.type, data: detail.item }); setView('form'); }}
         toast={toast}
@@ -230,6 +236,12 @@ export default function Articles() {
 function ScopeModal({ current, onClose, onApply }) {
   const [svc, setSvc] = useState(current.service);
   const [mag, setMag] = useState(current.magasin);
+  const [magasins, setMagasins] = useState([]);
+
+  useEffect(() => {
+    fetchMagasins().then((r) => setMagasins((r.data || []).filter((m) => m.actif !== false)));
+  }, []);
+
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', padding: 24, width: '100%', maxWidth: 460 }}>
@@ -237,7 +249,7 @@ function ScopeModal({ current, onClose, onApply }) {
         <p style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 18 }}>Sélectionnez le service et le magasin à consulter.</p>
 
         <div style={{ marginBottom: 16 }}>
-          <div style={fieldLabel}>Service</div>
+          <div style={fieldLabelTransfer}>Service</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {SERVICES_REF.map((s) => (
               <button key={s.id} onClick={() => setSvc(s.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: svc === s.id ? 'var(--orange-light)' : 'var(--bg)', border: `1.5px solid ${svc === s.id ? 'var(--orange)' : 'var(--line)'}`, borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, color: svc === s.id ? 'var(--orange-dark)' : 'var(--ink)', textAlign: 'left' }}>
@@ -249,11 +261,11 @@ function ScopeModal({ current, onClose, onApply }) {
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <div style={fieldLabel}>Magasin</div>
+          <div style={fieldLabelTransfer}>Magasin</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {MAGASINS_REF.map((m) => (
+            {magasins.map((m) => (
               <button key={m.id} onClick={() => setMag(m.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: mag === m.id ? 'var(--orange-light)' : 'var(--bg)', border: `1.5px solid ${mag === m.id ? 'var(--orange)' : 'var(--line)'}`, borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, color: mag === m.id ? 'var(--orange-dark)' : 'var(--ink)', textAlign: 'left' }}>
-                <span style={{ fontSize: 16 }}>{m.icon}</span>
+                <span style={{ fontSize: 16 }}>{m.icon || '🏪'}</span>
                 <span>{m.nom}</span>
               </button>
             ))}
@@ -270,12 +282,14 @@ function ScopeModal({ current, onClose, onApply }) {
 }
 
 // ===== DETAIL VIEW =====
-function DetailView({ type, item, activeMagasin, emplacementSuggestions = [], onBack, onEdit, toast }) {
+function DetailView({ type, item, activeService, activeMagasin, emplacementSuggestions = [], isAdmin = false, userId, onBack, onEdit, toast }) {
   const isCable = type === 'cable';
   const ref = isCable ? item.ref_type : item.ref;
   const [tourets, setTourets] = useState([]);
   const [touretsLoading, setTouretsLoading] = useState(false);
   const [showTouretForm, setShowTouretForm] = useState(false);
+  const [transferModalTouret, setTransferModalTouret] = useState(null);
+  const [labelModal, setLabelModal] = useState(null); // null | { tourets: [...] }
 
   const loadTourets = useCallback(async () => {
     if (!isCable) return;
@@ -358,20 +372,62 @@ function DetailView({ type, item, activeMagasin, emplacementSuggestions = [], on
             {touretsLoading ? <PageLoader /> : tourets.length === 0 ? (
               <Empty icon="🎰" text="Aucun touret" sub="Ajoutez un touret pour commencer." />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {tourets.map((t) => (
-                  <TouretItem key={t.id} touret={t} suggestions={emplacementSuggestions} onUpdate={loadTourets} toast={toast} />
-                ))}
-              </div>
+              <>
+                <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button variant="secondary" onClick={() => setLabelModal({ tourets, title: `Planche ${item.nom}` })} style={{ padding: '8px 14px', fontSize: 13 }}>
+                    🖨 Imprimer planche ({tourets.length})
+                  </Button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {tourets.map((t) => (
+                    <TouretItem
+                      key={t.id}
+                      touret={t}
+                      suggestions={emplacementSuggestions}
+                      isAdmin={isAdmin}
+                      cableInfo={item}
+                      scopeInfo={{ service: activeService, magasin: activeMagasin }}
+                      onUpdate={loadTourets}
+                      onTransfer={(touret) => setTransferModalTouret(touret)}
+                      onLabel={(touret) => setLabelModal({ tourets: [touret], title: `Étiquette ${touret.ref_touret}` })}
+                      toast={toast}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </>
         )}
       </div>
+
+      {transferModalTouret && (
+        <TransferModal
+          touret={transferModalTouret}
+          cable={item}
+          currentService={activeService}
+          currentMagasin={activeMagasin}
+          userId={userId}
+          onClose={() => setTransferModalTouret(null)}
+          onDone={() => { setTransferModalTouret(null); loadTourets(); toast('✓ Touret transféré', 'success'); }}
+          toast={toast}
+        />
+      )}
+
+      {labelModal && (
+        <LabelFormatModal
+          tourets={labelModal.tourets}
+          cable={item}
+          scopeInfo={{ service: activeService, magasin: activeMagasin }}
+          title={labelModal.title}
+          onClose={() => setLabelModal(null)}
+          toast={toast}
+        />
+      )}
     </Layout>
   );
 }
 
-function TouretItem({ touret, suggestions = [], onUpdate, toast }) {
+function TouretItem({ touret, suggestions = [], cableInfo = {}, scopeInfo = {}, isAdmin = false, onUpdate, onTransfer, onLabel, toast }) {
   const [editing, setEditing] = useState(false);
   const [restante, setRestante] = useState(touret.restante);
   const [emplacement, setEmplacement] = useState(touret.emplacement || '');
@@ -438,8 +494,14 @@ function TouretItem({ touret, suggestions = [], onUpdate, toast }) {
         <div className="mono" style={{ fontWeight: 800, fontSize: 14 }}>{touret.restante} m</div>
         {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
       </div>
-      <button onClick={() => setEditing(true)} style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
-      <button onClick={del} style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
+      <button onClick={() => setEditing(true)} title="Modifier" style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
+      {onLabel && (
+        <button onClick={() => onLabel(touret)} title="Imprimer étiquette" style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>🖨</button>
+      )}
+      {isAdmin && onTransfer && (
+        <button onClick={() => onTransfer(touret)} title="Transférer vers un autre périmètre" style={{ background: 'var(--blue-light, #DBEAFE)', color: 'var(--blue)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 800 }}>🔄</button>
+      )}
+      <button onClick={del} title="Supprimer" style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontWeight: 800, fontFamily: 'inherit' }}>🗑</button>
     </div>
   );
 }
@@ -667,7 +729,7 @@ const input = { width: '100%', padding: 12, border: '1.5px solid var(--line)', b
 function Field({ label, required, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={fieldLabel}>{label}{required && <span style={{ color: 'var(--red)' }}> *</span>}</div>
+      <div style={fieldLabelTransfer}>{label}{required && <span style={{ color: 'var(--red)' }}> *</span>}</div>
       {children}
     </div>
   );
@@ -945,3 +1007,232 @@ function ImportModal({ mode, service, magasin, onClose, onDone, toast }) {
 
 const th = { textAlign: 'left', padding: '8px 10px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)' };
 const td = { padding: '8px 10px', fontWeight: 600 };
+
+// ===== MODAL TRANSFERT TOURET =====
+function TransferModal({ touret, cable, currentService, currentMagasin, userId, onClose, onDone, toast }) {
+  const [magasins, setMagasins] = useState([]);
+  const [destService, setDestService] = useState('');
+  const [destMagasin, setDestMagasin] = useState('');
+  const [motif, setMotif] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetchMagasins().then((r) => setMagasins((r.data || []).filter((m) => m.actif !== false)));
+  }, []);
+
+  // Magasins disponibles pour le service de destination
+  const availableMagasins = useMemo(() => {
+    if (!destService) return [];
+    return magasins.filter((m) =>
+      (m.magasins_services || []).some((ms) => ms.service_id === destService)
+    );
+  }, [magasins, destService]);
+
+  // Reset magasin si plus disponible pour le service choisi
+  useEffect(() => {
+    if (destMagasin && !availableMagasins.find((m) => m.id === destMagasin)) {
+      setDestMagasin('');
+    }
+  }, [availableMagasins, destMagasin]);
+
+  const isSameScope = destService === currentService && destMagasin === currentMagasin;
+
+  async function submit() {
+    if (!destService || !destMagasin) return toast('Sélectionnez un service et un magasin', 'error');
+    if (isSameScope) return toast('Choisissez un périmètre différent', 'error');
+    setSubmitting(true);
+    const res = await transferTouret({
+      touretId: touret.id,
+      destService,
+      destMagasin,
+      motif,
+      userId,
+    });
+    setSubmitting(false);
+    if (res.ok) onDone();
+    else toast('Erreur : ' + res.error, 'error');
+  }
+
+  return (
+    <div onClick={onClose} style={modalBackdrop}>
+      <div onClick={(e) => e.stopPropagation()} style={modalPanel}>
+        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+            🔄 Transférer un touret
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>
+            <span className="mono">{touret.ref_touret}</span>
+          </h2>
+          <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600, margin: '4px 0 0' }}>
+            {cable?.nom} · <span className="mono">{touret.restante} m</span> restant
+          </p>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={fieldLabelTransfer}>Service de destination</label>
+            <select value={destService} onChange={(e) => setDestService(e.target.value)} style={selectStyle}>
+              <option value="">— Choisir un service —</option>
+              {SERVICES_REF.map((s) => (
+                <option key={s.id} value={s.id}>{s.icon} {s.nom}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={fieldLabelTransfer}>Magasin de destination</label>
+            <select value={destMagasin} onChange={(e) => setDestMagasin(e.target.value)} style={selectStyle} disabled={!destService}>
+              <option value="">— Choisir un magasin —</option>
+              {availableMagasins.map((m) => (
+                <option key={m.id} value={m.id}>{m.nom}</option>
+              ))}
+            </select>
+            {destService && availableMagasins.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600, marginTop: 4 }}>
+                Aucun magasin disponible pour ce service.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label style={fieldLabelTransfer}>Motif (optionnel)</label>
+            <input type="text" value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Ex: Réaffectation chantier" style={inputStyle} />
+          </div>
+
+          {isSameScope && (
+            <div style={{ padding: 10, background: 'var(--red-light)', color: 'var(--red)', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 700 }}>
+              ⚠ Le périmètre choisi est identique au périmètre actuel.
+            </div>
+          )}
+
+          {destService && destMagasin && !isSameScope && (
+            <div style={{ padding: 10, background: 'var(--bg)', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600 }}>
+              💡 Si aucun type de câble correspondant n'existe en destination, il sera créé automatiquement (nom + catégorie identiques).
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: 14, borderTop: '1px solid var(--line)', display: 'flex', gap: 10 }}>
+          <Button variant="secondary" onClick={onClose} style={{ flex: 1 }}>Annuler</Button>
+          <Button onClick={submit} disabled={submitting || !destService || !destMagasin || isSameScope} style={{ flex: 1 }}>
+            {submitting ? '...' : '🔄 Transférer'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== MODAL FORMAT ÉTIQUETTES =====
+function LabelFormatModal({ tourets, cable, scopeInfo, title, onClose, toast }) {
+  const [format, setFormat] = useState('medium');
+  const [generating, setGenerating] = useState(false);
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      const magasinInfo = getMagasinInfo(scopeInfo?.magasin);
+      const data = tourets.map((t) => ({
+        ref_touret: t.ref_touret,
+        initiale: t.initiale,
+        restante: t.restante,
+        nom_cable: cable?.nom || '',
+        categorie: cable?.categorie || '',
+        ref_type: cable?.ref_type || '',
+        emplacement: t.emplacement || '',
+        magasin: magasinInfo?.nom || '',
+      }));
+      const doc = await generateTouretLabels(data, { format, title });
+      downloadPdf(doc, `etiquettes-tourets-${Date.now()}.pdf`);
+      toast(`✓ PDF généré (${tourets.length} étiquette${tourets.length > 1 ? 's' : ''})`, 'success');
+      onClose();
+    } catch (err) {
+      console.error(err);
+      toast('Erreur génération PDF : ' + err.message, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={modalBackdrop}>
+      <div onClick={(e) => e.stopPropagation()} style={modalPanel}>
+        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ fontSize: 11, color: 'var(--orange)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+            🖨 Générer les étiquettes PDF
+          </div>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>
+            {tourets.length} étiquette{tourets.length > 1 ? 's' : ''} à imprimer
+          </h2>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          <label style={fieldLabelTransfer}>Format des étiquettes</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {Object.values(LABEL_FORMATS).map((f) => {
+              const active = format === f.id;
+              const pages = Math.ceil(tourets.length / f.perPage);
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setFormat(f.id)}
+                  style={{
+                    padding: '14px 16px',
+                    background: active ? 'var(--orange-light)' : 'white',
+                    border: `1.5px solid ${active ? 'var(--orange)' : 'var(--line)'}`,
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: active ? 'var(--orange-dark)' : 'var(--ink)' }}>{f.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
+                      {tourets.length} étiquette{tourets.length > 1 ? 's' : ''} → {pages} page{pages > 1 ? 's' : ''} A4
+                    </div>
+                  </div>
+                  {active && <span style={{ fontSize: 18, color: 'var(--orange)' }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ padding: 14, borderTop: '1px solid var(--line)', display: 'flex', gap: 10 }}>
+          <Button variant="secondary" onClick={onClose} style={{ flex: 1 }}>Annuler</Button>
+          <Button onClick={generate} disabled={generating} style={{ flex: 1 }}>
+            {generating ? '...' : '🖨 Générer PDF'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const modalBackdrop = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.55)',
+  zIndex: 100,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+  animation: 'fade-in 0.18s ease-out',
+};
+const modalPanel = {
+  background: 'white',
+  borderRadius: 'var(--radius-lg)',
+  width: '100%',
+  maxWidth: 500,
+  maxHeight: '90vh',
+  display: 'flex',
+  flexDirection: 'column',
+};
+const fieldLabelTransfer = { fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'block' };
+const inputStyle = { width: '100%', padding: '10px 14px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600, fontSize: 13, outline: 'none' };
+const selectStyle = { ...inputStyle, cursor: 'pointer' };

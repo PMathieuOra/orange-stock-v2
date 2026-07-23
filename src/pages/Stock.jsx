@@ -1,12 +1,15 @@
 import { useState, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { useStock, usePendingOrders } from '../hooks/useStock';
+import { useSession } from '../contexts/SessionContext';
 import { PageLoader, Empty, Badge } from '../components/ui';
 import { fmtDate, fmtRelative } from '../lib/helpers';
+import { getServiceInfo } from '../lib/supabase';
 
 export default function Stock() {
   const { items, loading, error } = useStock();
   const { pendingItems, loading: pendingLoading } = usePendingOrders();
+  const { isMultiService } = useSession();
   const [tab, setTab] = useState('all'); // 'all' | 'critical' | 'pending' | 'conso' | 'fibre' | 'cuivre'
   const [search, setSearch] = useState('');
   const [criticalModalOpen, setCriticalModalOpen] = useState(false);
@@ -16,7 +19,6 @@ export default function Stock() {
   const filtered = useMemo(() => items.filter((it) => {
     const cat = norm(it.categorie);
     // Filtre catégorie
-    if (tab === 'critical' && !(it.est_critique && it.actif)) return false;
     if (tab === 'conso' && it.type !== 'conso') return false;
     if (tab === 'fibre' && (it.type !== 'cable' || cat !== 'fibre')) return false;
     if (tab === 'cuivre' && (it.type !== 'cable' || cat !== 'cuivre')) return false;
@@ -54,7 +56,6 @@ export default function Stock() {
 
   const tabs = [
     { id: 'all', label: 'Tous', count: counts.all, color: 'var(--ink)' },
-    { id: 'critical', label: '⚠ Critiques', count: counts.critical, color: 'var(--red)' },
     { id: 'pending', label: '📋 En commande', count: counts.pending, color: 'var(--blue)' },
     { id: 'conso', label: '📦 Conso', count: counts.conso, color: 'var(--orange)' },
     { id: 'fibre', label: '🟢 Fibre', count: counts.fibre, color: 'var(--green)' },
@@ -62,10 +63,42 @@ export default function Stock() {
   ];
 
   return (
-    <Layout brandTitle="Stock" brandSub="Inventaire">
+    <Layout brandTitle="Stock" brandSub="Inventaire" allowMultiService>
       <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Inventaire</h1>
-        <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>État du stock par périmètre.</p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 4, flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Inventaire</h1>
+            <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>État du stock par périmètre.</p>
+          </div>
+          {counts.critical > 0 && (
+            <button
+              onClick={() => setCriticalModalOpen(true)}
+              style={{
+                background: 'var(--red)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '100px',
+                padding: '10px 16px',
+                fontWeight: 800,
+                fontSize: 14,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 4px 14px rgba(230,57,70,0.35)',
+                animation: 'critical-pulse 2s ease-in-out infinite',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.04)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            >
+              <span style={{ fontSize: 16 }}>⚠️</span>
+              <span>{counts.critical} article{counts.critical > 1 ? 's' : ''} critique{counts.critical > 1 ? 's' : ''}</span>
+              <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 700 }}>→ détail</span>
+            </button>
+          )}
+        </div>
 
         <input
           placeholder="🔍 Rechercher par référence, nom ou n° de touret..."
@@ -82,8 +115,6 @@ export default function Stock() {
         <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto' }} className="no-scrollbar">
           {tabs.map((t) => {
             const active = tab === t.id;
-            // Pour le tab Critique : la bulle ouvre le modal au lieu de filtrer
-            const bubbleClickable = t.id === 'critical' && t.count > 0;
             return (
               <button
                 key={t.id}
@@ -105,23 +136,14 @@ export default function Stock() {
                 }}
               >
                 {t.label}
-                <span
-                  onClick={bubbleClickable ? (e) => { e.stopPropagation(); setCriticalModalOpen(true); } : undefined}
-                  title={bubbleClickable ? 'Voir le détail des articles critiques' : undefined}
-                  style={{
-                    background: active ? 'rgba(255,255,255,0.25)' : 'var(--bg)',
-                    color: active ? 'white' : 'var(--ink-4)',
-                    padding: '1px 7px',
-                    borderRadius: '100px',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    cursor: bubbleClickable ? 'pointer' : 'default',
-                    transition: 'transform 0.15s',
-                    ...(bubbleClickable && { outline: `1.5px solid ${active ? 'rgba(255,255,255,0.5)' : t.color}` }),
-                  }}
-                  onMouseEnter={bubbleClickable ? (e) => { e.currentTarget.style.transform = 'scale(1.15)'; } : undefined}
-                  onMouseLeave={bubbleClickable ? (e) => { e.currentTarget.style.transform = 'scale(1)'; } : undefined}
-                >{t.count}</span>
+                <span style={{
+                  background: active ? 'rgba(255,255,255,0.25)' : 'var(--bg)',
+                  color: active ? 'white' : 'var(--ink-4)',
+                  padding: '1px 7px',
+                  borderRadius: '100px',
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}>{t.count}</span>
               </button>
             );
           })}
@@ -155,7 +177,7 @@ export default function Stock() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
             gap: 10,
           }}>
-            {filtered.map((it) => <StockItem key={`${it.type}-${it.ref || it.id}`} item={it} />)}
+            {filtered.map((it) => <StockItem key={`${it.type}-${it.service_id}-${it.ref || it.id}`} item={it} showServiceBadge={isMultiService} />)}
           </div>
         )}
       </div>
@@ -172,9 +194,24 @@ export default function Stock() {
 }
 
 // ===== Item carte (conso ou câble) =====
-function StockItem({ item }) {
-  if (item.type === 'cable') return <CableItem item={item} />;
-  return <ConsoItem item={item} />;
+function StockItem({ item, showServiceBadge = false }) {
+  if (item.type === 'cable') return <CableItem item={item} showServiceBadge={showServiceBadge} />;
+  return <ConsoItem item={item} showServiceBadge={showServiceBadge} />;
+}
+
+function ServiceBadge({ serviceId }) {
+  const info = getServiceInfo(serviceId);
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      fontSize: 10, fontWeight: 800, padding: '2px 6px', borderRadius: 4,
+      background: info.couleur + '18', color: info.couleur,
+      letterSpacing: '0.03em', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ fontSize: 10 }}>{info.icon}</span>
+      <span>{info.nom}</span>
+    </span>
+  );
 }
 
 // ===== Carte d'article en commande =====
@@ -246,7 +283,7 @@ function PendingItem({ item }) {
   );
 }
 
-function ConsoItem({ item }) {
+function ConsoItem({ item, showServiceBadge = false }) {
   return (
     <div style={{
       display: 'flex',
@@ -259,7 +296,10 @@ function ConsoItem({ item }) {
       opacity: item.actif ? 1 : 0.5,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+          {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
+          <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+        </div>
         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <span className="mono">{item.ref}</span>
           <span>·</span>
@@ -282,7 +322,7 @@ function ConsoItem({ item }) {
   );
 }
 
-function CableItem({ item }) {
+function CableItem({ item, showServiceBadge = false }) {
   const totalInitial = (item.tourets || []).reduce((s, t) => s + t.initiale, 0);
   const totalRestant = (item.tourets || []).reduce((s, t) => s + t.restante, 0);
   const pctGlobal = totalInitial > 0 ? (totalRestant / totalInitial) * 100 : 0;
@@ -298,7 +338,10 @@ function CableItem({ item }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+            {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
+            <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+          </div>
           <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
             <span className="mono">{item.ref || '—'}</span>
             {' · '}{tourets.length} touret{tourets.length > 1 ? 's' : ''}

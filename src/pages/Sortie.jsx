@@ -7,12 +7,13 @@ import { useSession } from '../contexts/SessionContext';
 import { PageLoader, Empty, Badge, Button } from '../components/ui';
 import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
 import { touretStatus } from '../lib/helpers';
+import { getServiceInfo } from '../lib/supabase';
 
 export default function Sortie() {
   const { items, loading, error, refetch } = useStock();
   const { toast } = useToast();
   const { user } = useAuth();
-  const { service, magasin } = useSession();
+  const { magasin, isMultiService } = useSession();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -68,7 +69,7 @@ export default function Sortie() {
     } else {
       // Câble : ouvrir le sélecteur de touret (utilise l'ID qui est toujours présent)
       setTouretPicker({ item, tourets: [], loading: true });
-      const res = await fetchTouretsForRef(item.id, service, magasin);
+      const res = await fetchTouretsForRef(item.id, item.service_id, magasin);
       if (!res.ok) {
         toast(res.error, 'error');
         setTouretPicker(null);
@@ -85,7 +86,7 @@ export default function Sortie() {
 
   function addConsoToCart(item) {
     setCart((c) => {
-      const existing = c.find((x) => x.ref === item.ref && x.type === 'conso');
+      const existing = c.find((x) => x.ref === item.ref && x.type === 'conso' && x.service_id === item.service_id);
       if (existing) {
         const newQty = Math.min(existing.qty + 1, item.qty);
         if (newQty === existing.qty) {
@@ -94,7 +95,7 @@ export default function Sortie() {
         }
         return c.map((x) => (x === existing ? { ...x, qty: newQty } : x));
       }
-      return [...c, { ref: item.ref, nom: item.nom, type: 'conso', qty: 1, qtyDispo: item.qty }];
+      return [...c, { ref: item.ref, nom: item.nom, type: 'conso', qty: 1, qtyDispo: item.qty, service_id: item.service_id }];
     });
   }
 
@@ -104,7 +105,6 @@ export default function Sortie() {
     if (q > touret.restante) return toast(`Maximum disponible : ${touret.restante}m`, 'error');
 
     setCart((c) => {
-      // Vérifier si ce touret est déjà au panier
       const existing = c.find((x) => x.type === 'cable' && x.touretId === touret.id);
       if (existing) {
         const newQty = existing.qty + q;
@@ -122,6 +122,7 @@ export default function Sortie() {
         qtyDispo: touret.restante,
         touretId: touret.id,
         touretRef: touret.ref_touret,
+        service_id: item.service_id,
       }];
     });
     setTouretPicker(null);
@@ -150,7 +151,6 @@ export default function Sortie() {
     setValidating(true);
     const res = await validateSortie({
       cart,
-      service,
       magasin,
       userId: user.id,
       note: note.trim(),
@@ -169,7 +169,7 @@ export default function Sortie() {
   const totalItems = cart.reduce((s, x) => s + x.qty, 0);
 
   return (
-    <Layout brandTitle="Sortie" brandSub="Stock">
+    <Layout brandTitle="Sortie" brandSub="Stock" allowMultiService>
       <div style={{ padding: '16px 20px', maxWidth: 1400, margin: '0 auto' }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', marginBottom: 4 }}>Sortie de stock</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>
@@ -237,17 +237,28 @@ export default function Sortie() {
             paddingBottom: cart.length > 0 ? 120 : 20,
           }}>
             {filtered.map((it) => {
-              const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type);
+              const inCartLines = cart.filter((c) => c.ref === it.ref && c.type === it.type && c.service_id === it.service_id);
               const inCartTotal = inCartLines.reduce((s, x) => s + x.qty, 0);
+              const svcInfo = isMultiService ? getServiceInfo(it.service_id) : null;
               // Badge catégorie visible
               let catBadge = null;
               if (it.type === 'conso') catBadge = { label: 'CONSO', color: '#FF7900', bg: '#FFF5EB' };
               else if (norm(it.categorie) === 'fibre') catBadge = { label: 'FIBRE', color: '#00A86B', bg: '#E8F7F0' };
               else if (norm(it.categorie) === 'cuivre') catBadge = { label: 'CUIVRE', color: '#D97706', bg: '#FEF6E7' };
               return (
-                <div key={`${it.type}-${it.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
+                <div key={`${it.type}-${it.service_id}-${it.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+                      {svcInfo && <span style={{
+                        background: svcInfo.couleur + '18',
+                        color: svcInfo.couleur,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        letterSpacing: '0.03em',
+                        whiteSpace: 'nowrap',
+                      }}>{svcInfo.icon} {svcInfo.nom}</span>}
                       {catBadge && <span style={{
                         background: catBadge.bg,
                         color: catBadge.color,

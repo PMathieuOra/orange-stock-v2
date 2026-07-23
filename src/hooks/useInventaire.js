@@ -280,14 +280,30 @@ export async function createRegularisation({ articleId, qtyApres, motif, userId,
 
 // Liste les régularisations du scope, triées par date desc
 export async function fetchRegularisations({ service, magasin, limit = 50 }) {
+  // 1. Récupérer les régul
   const { data, error } = await supabase
     .from('regularisations')
-    .select('*, users(prenom, nom_initiale)')
+    .select('*')
     .eq('service_id', service)
     .eq('magasin_id', magasin)
     .order('created_at', { ascending: false })
     .limit(limit);
-  return { ok: !error, data: data || [], error: error?.message };
+  if (error) return { ok: false, data: [], error: error.message };
+  if (!data || data.length === 0) return { ok: true, data: [] };
+
+  // 2. Récupérer les utilisateurs concernés (pour le nom)
+  const userIds = [...new Set(data.map((r) => r.cree_par).filter(Boolean))];
+  if (userIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, prenom, nom_initiale')
+      .in('id', userIds);
+    const userMap = {};
+    (users || []).forEach((u) => { userMap[u.id] = u; });
+    data.forEach((r) => { r.users = userMap[r.cree_par] || null; });
+  }
+
+  return { ok: true, data };
 }
 
 // Stats des régularisations (calculées côté React car pas de vue SQL)
