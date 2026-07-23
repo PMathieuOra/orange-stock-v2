@@ -43,32 +43,47 @@ export function slugify(nom) {
 }
 
 // Crée un magasin
-export async function createMagasin({ id, nom, services }) {
+export async function createMagasin({ id, nom, services, icon = '🏪' }) {
   if (!id || !nom) return { ok: false, error: 'Identifiant et nom requis' };
 
+  console.log('[createMagasin] Tentative insert magasin:', { id, nom, icon });
   const { data: magasin, error } = await supabase
     .from('magasins')
-    .insert({ id, nom: nom.trim(), actif: true })
+    .insert({ id, nom: nom.trim(), icon, actif: true })
     .select()
     .single();
-  if (error) return { ok: false, error: error.message };
+
+  if (error) {
+    console.error('[createMagasin] Erreur insert magasin:', error);
+    return { ok: false, error: `Impossible de créer le magasin : ${error.message} (code: ${error.code || 'N/A'})` };
+  }
+
+  console.log('[createMagasin] Magasin créé:', magasin);
 
   // Liaison services
   if (services && services.length > 0) {
     const links = services.map((s) => ({ magasin_id: id, service_id: s }));
+    console.log('[createMagasin] Insert magasins_services:', links);
     const { error: linkErr } = await supabase.from('magasins_services').insert(links);
-    if (linkErr) return { ok: false, error: linkErr.message };
+    if (linkErr) {
+      console.error('[createMagasin] Erreur insert liaison services:', linkErr);
+      return { ok: false, error: `Magasin créé mais liaison services échouée : ${linkErr.message}` };
+    }
   }
 
   return { ok: true, magasin };
 }
 
 // Met à jour un magasin
-export async function updateMagasin(magasinId, { nom, services }) {
-  if (nom !== undefined) {
+export async function updateMagasin(magasinId, { nom, services, icon }) {
+  const updates = {};
+  if (nom !== undefined) updates.nom = nom.trim();
+  if (icon !== undefined) updates.icon = icon;
+
+  if (Object.keys(updates).length > 0) {
     const { error } = await supabase
       .from('magasins')
-      .update({ nom: nom.trim() })
+      .update(updates)
       .eq('id', magasinId);
     if (error) return { ok: false, error: error.message };
   }
