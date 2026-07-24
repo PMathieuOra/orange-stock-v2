@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
 import { useToast } from '../contexts/ToastContext';
-import { getServiceInfo } from '../lib/supabase';
+import { getServiceInfo, supabase } from '../lib/supabase';
 
 const MAGASINS_REF = [
   { id: 'troyes', nom: 'Troyes', icon: '🏠' },
@@ -175,6 +175,50 @@ export default function SessionSelectors({ beforeServiceChange, beforeMagasinCha
   const { user } = useAuth();
   const { service, services, magasin, changeService, toggleService, changeMagasin } = useSession();
   const { toast } = useToast();
+  const [magasinServices, setMagasinServices] = useState({}); // { magasinId: [service_ids] }
+
+  // Charger la liste des services hébergés par chaque magasin de l'utilisateur
+  useEffect(() => {
+    if (!user || !user.magasins || user.magasins.length === 0) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from('magasins_services')
+        .select('magasin_id, service_id')
+        .in('magasin_id', user.magasins);
+      if (error || !data) return;
+      const map = {};
+      data.forEach((row) => {
+        if (!map[row.magasin_id]) map[row.magasin_id] = [];
+        map[row.magasin_id].push(row.service_id);
+      });
+      setMagasinServices(map);
+    })();
+  }, [user]);
+
+  // Services disponibles = intersection (droits user) ∩ (services hébergés dans le magasin actuel)
+  const servicesInCurrentMagasin = magasinServices[magasin] || [];
+  const availableServices = user
+    ? user.services.filter((s) => servicesInCurrentMagasin.length === 0 || servicesInCurrentMagasin.includes(s))
+    : [];
+
+  // Auto-correct : si des services actifs ne sont plus disponibles dans ce magasin, on les retire
+  useEffect(() => {
+    if (availableServices.length === 0 || services.length === 0) return;
+    const validSelection = services.filter((s) => availableServices.includes(s));
+    if (validSelection.length !== services.length) {
+      if (validSelection.length > 0) {
+        // On garde ceux qui restent valides — passe par changeService pour reset propre
+        // (services devient [validSelection[0]] ou plus si multi)
+        const first = validSelection[0];
+        changeService(first);
+        // Ajouter les autres services valides restants (si multi)
+        validSelection.slice(1).forEach((s) => toggleService(s));
+      } else {
+        // Aucun service actif dispo → prendre le premier disponible
+        changeService(availableServices[0]);
+      }
+    }
+  }, [magasin, availableServices, services, changeService, toggleService]);
 
   if (!user || !service || !magasin) return null;
 
@@ -182,7 +226,7 @@ export default function SessionSelectors({ beforeServiceChange, beforeMagasinCha
     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
       <ServicePill
         selected={services}
-        options={user.services}
+        options={availableServices.length > 0 ? availableServices : user.services}
         multi={allowMultiService}
         beforeChange={beforeServiceChange}
         onToggle={(id) => {
