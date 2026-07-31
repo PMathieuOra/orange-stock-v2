@@ -19,11 +19,11 @@ export async function genIdentifiant(prenom, initiale) {
   return data;
 }
 
-// Liste tous les users avec leurs services et magasins
+// Liste tous les users avec leurs services, magasins et équipe
 export async function fetchUsers() {
   const { data, error } = await supabase
     .from('users')
-    .select('*, users_services(service_id), users_magasins(magasin_id)')
+    .select('*, users_services(service_id), users_magasins(magasin_id), equipes(id, nom, couleur)')
     .order('prenom');
   return { ok: !error, data: data || [], error: error?.message };
 }
@@ -51,7 +51,7 @@ function pickAvatarColor(existingUsers) {
 }
 
 // Crée un utilisateur
-export async function createUser({ prenom, initiale, role, services, magasins, allUsers = [] }) {
+export async function createUser({ prenom, initiale, role, services, magasins, equipeId, allUsers = [] }) {
   if (!prenom || !prenom.trim()) return { ok: false, error: 'Prénom requis' };
   if (!initiale || !initiale.trim()) return { ok: false, error: 'Initiale du nom requise' };
   if (!services || !services.length) return { ok: false, error: 'Au moins un service requis' };
@@ -75,6 +75,7 @@ export async function createUser({ prenom, initiale, role, services, magasins, a
       must_change_pwd: true,
       actif: true,
       avatar_couleur: avatarColor,
+      equipe_id: equipeId || null,
     })
     .select()
     .single();
@@ -95,11 +96,12 @@ export async function createUser({ prenom, initiale, role, services, magasins, a
 }
 
 // Met à jour un utilisateur (sauf identifiant et password)
-export async function updateUser(userId, { prenom, initiale, role, services, magasins }) {
+export async function updateUser(userId, { prenom, initiale, role, services, magasins, equipeId }) {
   const updates = {};
   if (prenom !== undefined) updates.prenom = prenom.trim();
   if (initiale !== undefined) updates.nom_initiale = initiale.trim().toUpperCase();
   if (role !== undefined) updates.role = role;
+  if (equipeId !== undefined) updates.equipe_id = equipeId || null;
 
   if (Object.keys(updates).length) {
     const { error } = await supabase.from('users').update(updates).eq('id', userId);

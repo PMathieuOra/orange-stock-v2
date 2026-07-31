@@ -201,3 +201,25 @@ export async function fetchEmplacementsSuggestions(service, magasin) {
   (t || []).forEach((x) => { if (x.emplacement) set.add(x.emplacement); });
   return Array.from(set).sort();
 }
+
+// Récupère tous les tourets d'un périmètre, groupés par type_cable_id (pour l'export)
+export async function fetchAllTouretsForScope(service, magasin) {
+  const { data, error } = await supabase
+    .from('tourets')
+    .select('id, ref_touret, initiale, restante, emplacement, type_cable_id, types_cable!inner(service_id, magasin_id)')
+    .eq('types_cable.service_id', service)
+    .eq('types_cable.magasin_id', magasin)
+    .order('ref_touret');
+  if (error) return { ok: false, byCable: {}, error: error.message };
+  const byCable = {};
+  (data || []).forEach((t) => {
+    if (!byCable[t.type_cable_id]) byCable[t.type_cable_id] = [];
+    byCable[t.type_cable_id].push({
+      ref_touret: t.ref_touret,
+      initiale: t.initiale,
+      restante: t.restante,
+      emplacement: t.emplacement,
+    });
+  });
+  return { ok: true, byCable };
+}

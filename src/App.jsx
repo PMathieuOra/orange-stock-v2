@@ -15,6 +15,7 @@ import Articles from './pages/Articles';
 import Utilisateurs from './pages/Utilisateurs';
 import Magasins from './pages/Magasins';
 import Inventaire from './pages/Inventaire';
+import Equipes from './pages/Equipes';
 
 // Route protégée : redirige vers /login si pas connecté
 function Protected({ children }) {
@@ -39,6 +40,7 @@ function AppRoutes() {
       <Route path="/admin/articles" element={<Protected><Articles /></Protected>} />
       <Route path="/admin/utilisateurs" element={<Protected><Utilisateurs /></Protected>} />
       <Route path="/admin/magasins" element={<Protected><Magasins /></Protected>} />
+      <Route path="/admin/equipes" element={<Protected><Equipes /></Protected>} />
       <Route path="/admin/inventaire" element={<Protected><Inventaire /></Protected>} />
       <Route path="*" element={<Navigate to="/sortie" replace />} />
     </Routes>

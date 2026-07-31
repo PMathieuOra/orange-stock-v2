@@ -11,6 +11,7 @@ import {
   fetchUsers, createUser, updateUser, toggleUserActif, resetPassword, deleteUser,
 } from '../hooks/useUsers';
 import { fetchMagasins } from '../hooks/useMagasins';
+import { fetchEquipes } from '../hooks/useEquipes';
 
 export default function Utilisateurs() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -20,6 +21,7 @@ export default function Utilisateurs() {
   const [view, setView] = useState('list'); // list | detail | form
   const [users, setUsers] = useState([]);
   const [magasins, setMagasins] = useState([]);
+  const [equipes, setEquipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all'); // all | actif | inactif
@@ -28,12 +30,14 @@ export default function Utilisateurs() {
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
-    const [usersRes, magsRes] = await Promise.all([
+    const [usersRes, magsRes, eqRes] = await Promise.all([
       fetchUsers(),
       fetchMagasins(),
+      fetchEquipes(),
     ]);
     setUsers(usersRes.data);
     setMagasins((magsRes.data || []).filter((m) => m.actif !== false));
+    setEquipes(eqRes.data || []);
     setLoading(false);
   }, []);
 
@@ -58,6 +62,7 @@ export default function Utilisateurs() {
         data={form.data}
         allUsers={users}
         availableMagasins={magasins}
+        availableEquipes={equipes}
         onCancel={() => { setView(detail ? 'detail' : 'list'); setForm(null); }}
         onDone={async () => {
           setForm(null);
@@ -206,6 +211,22 @@ export default function Utilisateurs() {
                       {u.role === 'admin' && <Badge color="gray">Admin</Badge>}
                       {!u.actif && <Badge color="red">Inactif</Badge>}
                       {u.must_change_pwd && <Badge color="amber">🔑</Badge>}
+                      {u.equipes && (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: 11,
+                          fontWeight: 800,
+                          padding: '2px 8px',
+                          borderRadius: '100px',
+                          background: (u.equipes.couleur || '#FF7900') + '18',
+                          color: u.equipes.couleur || '#FF7900',
+                        }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: u.equipes.couleur || '#FF7900' }} />
+                          {u.equipes.nom}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
                       <span className="mono">{u.identifiant}</span> · {nbSvc} service{nbSvc > 1 ? 's' : ''} · {nbMag} magasin{nbMag > 1 ? 's' : ''}
@@ -223,13 +244,14 @@ export default function Utilisateurs() {
 }
 
 // ===== USER FORM =====
-function UserForm({ mode, data, allUsers, availableMagasins = [], onCancel, onDone, toast }) {
+function UserForm({ mode, data, allUsers, availableMagasins = [], availableEquipes = [], onCancel, onDone, toast }) {
   const isEdit = mode === 'edit';
   const [prenom, setPrenom] = useState(isEdit ? data.prenom : '');
   const [initiale, setInitiale] = useState(isEdit ? data.nom_initiale : '');
   const [role, setRole] = useState(isEdit ? data.role : 'user');
   const [services, setServices] = useState(isEdit ? (data.users_services || []).map((s) => s.service_id) : []);
   const [magasins, setMagasins] = useState(isEdit ? (data.users_magasins || []).map((m) => m.magasin_id) : []);
+  const [equipeId, setEquipeId] = useState(isEdit ? (data.equipe_id || '') : '');
   const [saving, setSaving] = useState(false);
 
   function toggleService(id) {
@@ -248,12 +270,12 @@ function UserForm({ mode, data, allUsers, availableMagasins = [], onCancel, onDo
 
     setSaving(true);
     if (isEdit) {
-      const res = await updateUser(data.id, { prenom, initiale, role, services, magasins });
+      const res = await updateUser(data.id, { prenom, initiale, role, services, magasins, equipeId: equipeId || null });
       setSaving(false);
       if (res.ok) { toast(`✓ ${prenom} mis à jour`, 'success'); onDone(); }
       else toast('Erreur : ' + res.error, 'error');
     } else {
-      const res = await createUser({ prenom, initiale, role, services, magasins, allUsers });
+      const res = await createUser({ prenom, initiale, role, services, magasins, equipeId: equipeId || null, allUsers });
       setSaving(false);
       if (res.ok) {
         toast(`✓ ${prenom} créé. Identifiant : ${res.identifiant}. MDP initial : 0000`, 'success');
@@ -292,6 +314,58 @@ function UserForm({ mode, data, allUsers, availableMagasins = [], onCancel, onDo
               <button key={id} onClick={() => setRole(id)} style={{ flex: 1, padding: 12, background: role === id ? 'var(--orange-light)' : 'white', color: role === id ? 'var(--orange-dark)' : 'var(--ink)', border: `1.5px solid ${role === id ? 'var(--orange)' : 'var(--line)'}`, borderRadius: 'var(--radius)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>{lbl}</button>
             ))}
           </div>
+        </Field>
+
+        <Field label="Équipe">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setEquipeId('')}
+              style={{
+                padding: '8px 14px',
+                background: !equipeId ? 'var(--ink)' : 'white',
+                color: !equipeId ? 'white' : 'var(--ink-3)',
+                border: `1.5px solid ${!equipeId ? 'var(--ink)' : 'var(--line)'}`,
+                borderRadius: '100px',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >Sans équipe</button>
+            {availableEquipes.map((eq) => {
+              const active = equipeId === eq.id;
+              return (
+                <button
+                  key={eq.id}
+                  type="button"
+                  onClick={() => setEquipeId(eq.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 14px',
+                    background: active ? (eq.couleur || '#FF7900') : 'white',
+                    color: active ? 'white' : 'var(--ink-3)',
+                    border: `1.5px solid ${active ? (eq.couleur || '#FF7900') : 'var(--line)'}`,
+                    borderRadius: '100px',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: active ? 'white' : (eq.couleur || '#FF7900') }} />
+                  {eq.nom}
+                </button>
+              );
+            })}
+          </div>
+          {availableEquipes.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 6 }}>
+              Aucune équipe créée. Rendez-vous dans Admin → Équipes pour en créer.
+            </div>
+          )}
         </Field>
 
         <Field label={`Services autorisés (${services.length}/${SERVICES_REF.length})`} required>

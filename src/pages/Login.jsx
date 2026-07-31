@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useSession } from '../contexts/SessionContext';
+import { useSession, readStoredScope } from '../contexts/SessionContext';
 import { useToast } from '../contexts/ToastContext';
 import { getServiceInfo } from '../lib/supabase';
 import { getMagasinInfo } from '../components/SessionSelectors';
@@ -66,15 +66,23 @@ export default function Login() {
   }
 
   function goToSetupOrFinish(user) {
-    const needService = user.services.length > 1;
-    const needMagasin = user.magasins.length > 1;
-    if (!needService && !needMagasin) {
-      finish(user, user.services[0], user.magasins[0]);
-      return;
+    // On ne demande plus jamais le choix service/magasin.
+    // On restaure le dernier scope enregistré pour cet utilisateur,
+    // validé contre ses droits actuels. Sinon, premier dispo.
+    const stored = readStoredScope(user.id);
+    let svc, mag;
+    if (
+      stored &&
+      stored.services.every((s) => user.services.includes(s)) &&
+      user.magasins.includes(stored.magasin)
+    ) {
+      svc = stored.services; // array (peut être multi)
+      mag = stored.magasin;
+    } else {
+      svc = user.services[0];
+      mag = user.magasins[0];
     }
-    setSelService(needService ? null : user.services[0]);
-    setSelMagasin(needMagasin ? null : user.magasins[0]);
-    setStep('setup');
+    finish(user, svc, mag);
   }
 
   function finish(user, svc, mag) {

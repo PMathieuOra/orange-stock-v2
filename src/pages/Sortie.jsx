@@ -268,7 +268,7 @@ export default function Sortie() {
                         borderRadius: '4px',
                         letterSpacing: '0.05em',
                       }}>{catBadge.label}</span>}
-                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nom}</div>
+                      <div title={it.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nom}</div>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="mono">{it.ref}</span>

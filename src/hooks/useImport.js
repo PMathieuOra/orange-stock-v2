@@ -131,6 +131,78 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// ===== EXPORT (format ré-importable) =====
+
+// Exporte les consommables du périmètre au format du template d'import
+export function exportConsos(consos, { magasinNom = '' } = {}) {
+  // Colonnes identiques au template : ref, nom, seuil, qty, prix_ht, emplacement
+  const rows = (consos || []).map((c) => [
+    c.ref || '',
+    c.nom || '',
+    c.seuil ?? 0,
+    c.qty ?? 0,
+    c.prix_ht ?? 0,
+    c.emplacement || '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...rows]);
+  ws['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 22 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Consommables');
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const suffix = magasinNom ? `-${slugForFile(magasinNom)}` : '';
+  const date = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `export-consommables${suffix}-${date}.xlsx`);
+  return rows.length;
+}
+
+// Exporte les câbles+tourets du périmètre au format du template d'import
+// cables = [{ id, ref_type, nom, categorie, seuil, prix_ht }]
+// touretsByCable = { cableId: [{ ref_touret, initiale, emplacement }] }
+export function exportCables(cables, touretsByCable, { magasinNom = '' } = {}) {
+  // Colonnes : ref_touret, nom_type, categorie, longueur, ref_type, seuil, prix_ht, emplacement
+  const rows = [];
+  (cables || []).forEach((c) => {
+    const tourets = touretsByCable[c.id] || [];
+    if (tourets.length === 0) {
+      // Câble sans touret : on exporte quand même une ligne "vide de touret"
+      // pour ne pas perdre le type (ré-import recréera le type sans touret)
+      rows.push(['', c.nom || '', c.categorie || '', '', c.ref_type || '', c.seuil ?? 0, c.prix_ht ?? 0, '']);
+    } else {
+      tourets.forEach((t) => {
+        rows.push([
+          t.ref_touret || '',
+          c.nom || '',
+          c.categorie || '',
+          t.initiale ?? '',
+          c.ref_type || '',
+          c.seuil ?? 0,
+          c.prix_ht ?? 0,
+          t.emplacement || '',
+        ]);
+      });
+    }
+  });
+  const ws = XLSX.utils.aoa_to_sheet([CABLE_TEMPLATE_HEADERS, ...rows]);
+  ws['!cols'] = [{ wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 8 }, { wch: 10 }, { wch: 22 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Tourets');
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const suffix = magasinNom ? `-${slugForFile(magasinNom)}` : '';
+  const date = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `export-cables${suffix}-${date}.xlsx`);
+  return rows.length;
+}
+
+function slugForFile(s) {
+  return String(s).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
 // ===== PARSING =====
 
 // Lit un fichier Excel ou CSV et renvoie un tableau d'objets {ref, nom, seuil, qty}

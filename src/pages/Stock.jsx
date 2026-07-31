@@ -245,7 +245,7 @@ function PendingItem({ item }) {
               borderRadius: 4,
               letterSpacing: '0.05em',
             }}>{catBadge.label}</span>}
-            <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div title={item.nom || item.ref} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {item.nom || item.ref}
             </div>
           </div>
@@ -298,7 +298,7 @@ function ConsoItem({ item, showServiceBadge = false }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
           {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
-          <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+          <div title={item.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <span className="mono">{item.ref}</span>
@@ -340,7 +340,7 @@ function CableItem({ item, showServiceBadge = false }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
             {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
-            <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+            <div title={item.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
             <span className="mono">{item.ref || '—'}</span>
@@ -641,7 +641,7 @@ function CriticalModal({ items, pendingItems, onClose }) {
                             borderRadius: 4,
                             letterSpacing: '0.05em',
                           }}>{catBadge.label}</span>}
-                          <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div title={it.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {it.nom}
                           </div>
                         </div>

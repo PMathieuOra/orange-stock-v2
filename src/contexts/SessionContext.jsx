@@ -2,7 +2,25 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import { useAuth } from './AuthContext';
 
 const SessionContext = createContext(null);
-const SCOPE_KEY = 'orange_session_scope';
+
+// Clé de stockage du dernier scope PAR utilisateur (persistant entre sessions)
+function scopeKey(userId) {
+  return `orange_scope_${userId || 'anon'}`;
+}
+
+// Lit le dernier scope enregistré pour un utilisateur donné
+export function readStoredScope(userId) {
+  try {
+    const stored = localStorage.getItem(scopeKey(userId));
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    const services = parsed?.services ? parsed.services : parsed?.service ? [parsed.service] : null;
+    if (!services || services.length === 0 || !parsed.magasin) return null;
+    return { services, magasin: parsed.magasin };
+  } catch (e) {
+    return null;
+  }
+}
 
 export function SessionProvider({ children }) {
   const { user } = useAuth();
@@ -15,22 +33,14 @@ export function SessionProvider({ children }) {
       setMagasin(null);
       return;
     }
-    let restored = null;
-    try {
-      const stored = sessionStorage.getItem(SCOPE_KEY);
-      if (stored) restored = JSON.parse(stored);
-    } catch (e) { /* ignore */ }
-
-    const restoredServices = restored?.services
-      ? restored.services
-      : restored?.service ? [restored.service] : null;
-
+    // Restaurer le dernier scope de CET utilisateur, validé contre ses droits actuels
+    const restored = readStoredScope(user.id);
     if (
-      restoredServices && restoredServices.length > 0 &&
-      restoredServices.every((s) => user.services.includes(s)) &&
+      restored &&
+      restored.services.every((s) => user.services.includes(s)) &&
       user.magasins.includes(restored.magasin)
     ) {
-      setServices(restoredServices);
+      setServices(restored.services);
       setMagasin(restored.magasin);
     } else {
       setServices(user.services.length > 0 ? [user.services[0]] : []);
@@ -39,10 +49,11 @@ export function SessionProvider({ children }) {
   }, [user]);
 
   const persist = useCallback((svcs, mag) => {
+    if (!user) return;
     try {
-      sessionStorage.setItem(SCOPE_KEY, JSON.stringify({ services: svcs, magasin: mag }));
+      localStorage.setItem(scopeKey(user.id), JSON.stringify({ services: svcs, magasin: mag }));
     } catch (e) { /* ignore */ }
-  }, []);
+  }, [user]);
 
   const changeService = useCallback((svc) => {
     const next = svc ? [svc] : [];

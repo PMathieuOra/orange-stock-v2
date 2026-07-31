@@ -12,9 +12,9 @@ import {
   fetchConsos, createConso, updateConso, toggleConsoActif, deleteConso,
   fetchCables, createCable, updateCable, toggleCableActif, deleteCable,
   fetchTouretsForCable, createTouret, updateTouretRestante, updateTouretEmplacement, deleteTouret,
-  fetchEmplacementsSuggestions,
+  fetchEmplacementsSuggestions, fetchAllTouretsForScope,
 } from '../hooks/useArticles';
-import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables } from '../hooks/useImport';
+import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables, exportConsos, exportCables } from '../hooks/useImport';
 import { transferTouret } from '../hooks/useTransfert';
 import { generateTouretLabels, downloadPdf, LABEL_FORMATS } from '../lib/labels';
 import { fetchMagasins } from '../hooks/useMagasins';
@@ -38,6 +38,7 @@ export default function Articles() {
   const [detail, setDetail] = useState(null); // {type, item}
   const [form, setForm] = useState(null); // {mode: 'create'|'edit', type, data}
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [emplacementSuggestions, setEmplacementSuggestions] = useState([]);
 
@@ -67,6 +68,40 @@ export default function Articles() {
   }, [activeService, activeMagasin]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Export de l'onglet courant au format ré-importable
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const magasinNom = getMagasinInfo(activeMagasin)?.nom || '';
+      if (tab === 'conso') {
+        if (!consos || consos.length === 0) {
+          toast('Aucun consommable à exporter', 'error');
+          return;
+        }
+        const n = exportConsos(consos, { magasinNom });
+        toast(`✓ ${n} consommable${n > 1 ? 's' : ''} exporté${n > 1 ? 's' : ''}`, 'success');
+      } else {
+        if (!cables || cables.length === 0) {
+          toast('Aucun câble à exporter', 'error');
+          return;
+        }
+        const res = await fetchAllTouretsForScope(activeService, activeMagasin);
+        if (!res.ok) {
+          toast('Erreur récupération tourets : ' + res.error, 'error');
+          return;
+        }
+        const n = exportCables(cables, res.byCable, { magasinNom });
+        toast(`✓ ${n} touret${n > 1 ? 's' : ''} exporté${n > 1 ? 's' : ''}`, 'success');
+      }
+    } catch (err) {
+      console.error('[Export] Erreur :', err);
+      toast('Erreur export : ' + err.message, 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // useMemo doit être appelé AVANT tout early return (Rules of Hooks)
   const itemsRaw = tab === 'conso' ? consos : cables;
@@ -149,6 +184,9 @@ export default function Articles() {
             </Button>
             <Button variant="secondary" onClick={() => setImportModalOpen(true)}>
               📥 Importer
+            </Button>
+            <Button variant="secondary" onClick={handleExport} disabled={exporting}>
+              {exporting ? '⏳ Export...' : '📤 Exporter'}
             </Button>
             <Button onClick={() => { setForm({ mode: 'create', type: tab, data: null }); setView('form'); }}>
               + Nouveau
