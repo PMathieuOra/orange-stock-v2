@@ -7,8 +7,7 @@ const CARDS = [
   { to: '/admin/commandes', icon: '📋', title: 'Commandes', sub: 'Suivi et réception', color: 'var(--blue)' },
   { to: '/admin/articles', icon: '📦', title: 'Articles', sub: 'Catalogue et tourets', color: 'var(--orange)' },
   { to: '/admin/inventaire', icon: '📋', title: 'Inventaire', sub: 'Contrôles et régul', color: '#D97706' },
-  { to: '/admin/utilisateurs', icon: '👥', title: 'Utilisateurs', sub: 'Comptes et droits', color: 'var(--purple)' },
-  { to: '/admin/equipes', icon: '🧑\u200d🤝\u200d🧑', title: 'Équipes', sub: 'Regrouper les utilisateurs', color: '#0891B2' },
+  { to: '/admin/utilisateurs', icon: '👥', title: 'Utilisateurs', sub: 'Comptes, droits et équipes', color: 'var(--purple)' },
   { to: '/admin/magasins', icon: '🏪', title: 'Magasins', sub: 'Sites de stockage', color: 'var(--green)' },
 ];
 

@@ -12,6 +12,7 @@ import {
 } from '../hooks/useUsers';
 import { fetchMagasins } from '../hooks/useMagasins';
 import { fetchEquipes } from '../hooks/useEquipes';
+import EquipesManager from '../components/EquipesManager';
 
 export default function Utilisateurs() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -27,6 +28,7 @@ export default function Utilisateurs() {
   const [filter, setFilter] = useState('all'); // all | actif | inactif
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(null); // {mode, data}
+  const [manageEquipes, setManageEquipes] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -185,7 +187,10 @@ export default function Utilisateurs() {
             <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em' }}>Utilisateurs</h1>
             <p style={{ color: 'var(--ink-3)', fontSize: 14 }}>{users.length} compte(s) au total</p>
           </div>
-          <Button onClick={() => { setForm({ mode: 'create', data: null }); setView('form'); }}>+ Nouvel utilisateur</Button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button variant="secondary" onClick={() => setManageEquipes(true)}>👥 Gérer les équipes</Button>
+            <Button onClick={() => { setForm({ mode: 'create', data: null }); setView('form'); }}>+ Nouvel utilisateur</Button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, margin: '16px 0', flexWrap: 'wrap' }}>
@@ -239,6 +244,15 @@ export default function Utilisateurs() {
           </div>
         )}
       </div>
+
+      {manageEquipes && (
+        <EquipesManager
+          allUsers={users}
+          onClose={() => setManageEquipes(false)}
+          onChanged={loadUsers}
+          toast={toast}
+        />
+      )}
     </Layout>
   );
 }
