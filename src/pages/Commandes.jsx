@@ -44,7 +44,47 @@ export default function Commandes() {
       .eq('service_id', service)
       .eq('magasin_id', magasin)
       .order('date_creation', { ascending: false });
-    setRows(data || []);
+
+    const commandes = data || [];
+
+    // Enrichir toutes les lignes avec le nom + prix des articles, en 2 requêtes max
+    // (une pour les conso, une pour les câbles) plutôt qu'une par commande.
+    const consoRefs = new Set();
+    const cableRefs = new Set();
+    commandes.forEach((c) => {
+      (c.commande_lignes || []).forEach((l) => {
+        if (c.type === 'cable') cableRefs.add(l.ref);
+        else consoRefs.add(l.ref);
+      });
+    });
+
+    const [consoArts, cableArts] = await Promise.all([
+      consoRefs.size > 0
+        ? supabase.from('articles_conso').select('ref, nom, prix_ht')
+            .in('ref', [...consoRefs]).eq('service_id', service).eq('magasin_id', magasin)
+        : Promise.resolve({ data: [] }),
+      cableRefs.size > 0
+        ? supabase.from('types_cable').select('ref_type, nom, categorie, prix_ht')
+            .in('ref_type', [...cableRefs]).eq('service_id', service).eq('magasin_id', magasin)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const consoByRef = {};
+    (consoArts.data || []).forEach((a) => { consoByRef[a.ref] = { nom: a.nom, prix_ht: a.prix_ht || 0 }; });
+    const cableByRef = {};
+    (cableArts.data || []).forEach((a) => { cableByRef[a.ref_type] = { nom: a.nom, prix_ht: a.prix_ht || 0, categorie: a.categorie }; });
+
+    commandes.forEach((c) => {
+      const map = c.type === 'cable' ? cableByRef : consoByRef;
+      c.commande_lignes = (c.commande_lignes || []).map((l) => ({
+        ...l,
+        nom: map[l.ref]?.nom || null,
+        prix_ht: map[l.ref]?.prix_ht || 0,
+        categorie: map[l.ref]?.categorie || null,
+      }));
+    });
+
+    setRows(commandes);
     setLoading(false);
   }, [service, magasin]);
 
@@ -62,7 +102,7 @@ export default function Commandes() {
     archivee: rows.filter((c) => c.statut === 'archivee').length,
   };
 
-  async function openDetail(cmd) {
+  async function openDetail(cmd, openView = 'detail') {
     const { data } = await supabase
       .from('commandes')
       .select('*, commande_lignes(*)')
@@ -98,7 +138,7 @@ export default function Commandes() {
     }
 
     setSelected(data || cmd);
-    setView('detail');
+    setView(openView === 'reception' && (data || cmd).statut === 'en_cours' ? 'reception' : 'detail');
   }
 
   if (view === 'list') {
@@ -123,26 +163,65 @@ export default function Commandes() {
           </div>
 
           {loading ? <PageLoader /> : filtered.length === 0 ? <Empty icon="📋" text="Aucune commande" sub="Aucune commande dans cette catégorie." /> : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {filtered.map((c) => {
-                const totalCmd = (c.commande_lignes || []).reduce((s, l) => s + l.qty_commandee, 0);
-                const totalRecu = (c.commande_lignes || []).reduce((s, l) => s + l.qty_recue, 0);
+                const lignes = c.commande_lignes || [];
+                const totalCmd = lignes.reduce((s, l) => s + l.qty_commandee, 0);
+                const totalRecu = lignes.reduce((s, l) => s + l.qty_recue, 0);
                 const pct = totalCmd > 0 ? Math.round((totalRecu / totalCmd) * 100) : 0;
+                const unite = c.type === 'cable' ? 'm' : 'u';
                 return (
-                  <button key={c.id} onClick={() => openDetail(c)} style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span className="mono" style={{ fontWeight: 800, fontSize: 15 }}>{c.numero}</span>
-                        <Badge color={STATUT_LABELS[c.statut].color}>{STATUT_LABELS[c.statut].label}</Badge>
-                        <Badge color={c.type === 'cable' ? 'blue' : 'orange'}>{c.type === 'cable' ? '🔌 Câble' : '📦 Conso'}</Badge>
+                  <div key={c.id} style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+                    {/* En-tête cliquable */}
+                    <button onClick={() => openDetail(c)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '14px 16px', background: 'none', border: 'none', borderBottom: '1px solid var(--line-2)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span className="mono" style={{ fontWeight: 800, fontSize: 15 }}>{c.numero}</span>
+                          <Badge color={STATUT_LABELS[c.statut].color}>{STATUT_LABELS[c.statut].label}</Badge>
+                          <Badge color={c.type === 'cable' ? 'blue' : 'orange'}>{c.type === 'cable' ? '🔌 Câble' : '📦 Conso'}</Badge>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 4 }}>
+                          Créée le {fmtDate(c.date_creation)} · {lignes.length} ligne{lignes.length > 1 ? 's' : ''}
+                          {c.statut === 'en_cours' && totalRecu > 0 && ` · ${pct}% reçu`}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 4 }}>
-                        Créée le {fmtDate(c.date_creation)} · {(c.commande_lignes || []).length} ligne(s)
-                        {c.statut === 'en_cours' && totalRecu > 0 && ` · ${pct}% reçu`}
-                      </div>
+                      {c.statut === 'en_cours' && (
+                        <Button onClick={(e) => { e.stopPropagation(); openDetail(c, 'reception'); }} style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0 }}>📥 Réceptionner</Button>
+                      )}
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M9 18l6-6-6-6" /></svg>
+                    </button>
+
+                    {/* Détail des articles, directement visible */}
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      {lignes.length === 0 ? (
+                        <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--ink-4)', fontStyle: 'italic' }}>Aucun article</div>
+                      ) : lignes.map((l, i) => {
+                        const complete = l.qty_recue >= l.qty_commandee;
+                        return (
+                          <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--line-2)' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.nom || l.ref}>
+                                {l.nom || <span className="mono">{l.ref}</span>}
+                              </div>
+                              {l.nom && <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 1 }}>{l.ref}</div>}
+                            </div>
+                            {/* Quantité reçue / commandée */}
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: complete ? 'var(--green)' : 'var(--ink)' }}>
+                                {l.qty_recue}
+                              </span>
+                              <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-4)' }}> / {l.qty_commandee} {unite}</span>
+                            </div>
+                            {c.statut === 'en_cours' && (
+                              complete
+                                ? <span style={{ fontSize: 14, color: 'var(--green)', flexShrink: 0, width: 18, textAlign: 'center' }}>✓</span>
+                                : <span style={{ fontSize: 14, color: 'var(--amber)', flexShrink: 0, width: 18, textAlign: 'center' }}>⏳</span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-                  </button>
+                  </div>
                 );
               })}
             </div>

@@ -29,6 +29,7 @@ export default function Utilisateurs() {
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(null); // {mode, data}
   const [manageEquipes, setManageEquipes] = useState(false);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'byTeam'
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -193,55 +194,27 @@ export default function Utilisateurs() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, margin: '16px 0', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, margin: '16px 0', flexWrap: 'wrap', alignItems: 'center' }}>
           <input placeholder="🔍 Rechercher (prénom, identifiant...)" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, outline: 'none' }} />
           {[['all', 'Tous'], ['actif', '✓ Actifs'], ['inactif', '○ Inactifs']].map(([id, label]) => (
             <button key={id} onClick={() => setFilter(id)} style={{ background: filter === id ? 'var(--ink)' : 'white', color: filter === id ? 'white' : 'var(--ink-3)', border: '1.5px solid ' + (filter === id ? 'var(--ink)' : 'var(--line)'), borderRadius: '100px', padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{label}</button>
           ))}
+          {/* Bascule de vue */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--bg)', borderRadius: '100px', padding: 3, border: '1.5px solid var(--line)' }}>
+            {[['list', '☰ Liste'], ['byTeam', '👥 Par équipe']].map(([id, label]) => (
+              <button key={id} onClick={() => setViewMode(id)} style={{ background: viewMode === id ? 'white' : 'transparent', color: viewMode === id ? 'var(--ink)' : 'var(--ink-4)', border: 'none', boxShadow: viewMode === id ? 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.1))' : 'none', borderRadius: '100px', padding: '6px 12px', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{label}</button>
+            ))}
+          </div>
         </div>
 
-        {loading ? <PageLoader /> : filtered.length === 0 ? <Empty icon="👥" text="Aucun utilisateur" /> : (
+        {loading ? <PageLoader /> : filtered.length === 0 ? <Empty icon="👥" text="Aucun utilisateur" /> : viewMode === 'list' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filtered.map((u) => {
-              const nbSvc = (u.users_services || []).length;
-              const nbMag = (u.users_magasins || []).length;
-              return (
-                <button key={u.id} onClick={() => { setDetail(u); setView('detail'); }} style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit', opacity: u.actif ? 1 : 0.5 }}>
-                  <span className={u.avatar_couleur || 'c-orange'} style={{ width: 44, height: 44, borderRadius: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 14, flexShrink: 0 }}>
-                    {initials(u.prenom, u.nom_initiale)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      {displayName(u)}
-                      {u.role === 'admin' && <Badge color="gray">Admin</Badge>}
-                      {!u.actif && <Badge color="red">Inactif</Badge>}
-                      {u.must_change_pwd && <Badge color="amber">🔑</Badge>}
-                      {u.equipes && (
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          fontSize: 11,
-                          fontWeight: 800,
-                          padding: '2px 8px',
-                          borderRadius: '100px',
-                          background: (u.equipes.couleur || '#FF7900') + '18',
-                          color: u.equipes.couleur || '#FF7900',
-                        }}>
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: u.equipes.couleur || '#FF7900' }} />
-                          {u.equipes.nom}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-                      <span className="mono">{u.identifiant}</span> · {nbSvc} service{nbSvc > 1 ? 's' : ''} · {nbMag} magasin{nbMag > 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-                </button>
-              );
-            })}
+            {filtered.map((u) => (
+              <UserCard key={u.id} u={u} onClick={() => { setDetail(u); setView('detail'); }} />
+            ))}
           </div>
+        ) : (
+          <TeamGroupedView users={filtered} equipes={equipes} onUserClick={(u) => { setDetail(u); setView('detail'); }} />
         )}
       </div>
 
@@ -254,6 +227,114 @@ export default function Utilisateurs() {
         />
       )}
     </Layout>
+  );
+}
+
+// ===== Carte utilisateur (réutilisée en vue liste et vue par équipe) =====
+function UserCard({ u, onClick }) {
+  const nbSvc = (u.users_services || []).length;
+  const nbMag = (u.users_magasins || []).length;
+  return (
+    <button onClick={onClick} style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit', opacity: u.actif ? 1 : 0.5 }}>
+      <span className={u.avatar_couleur || 'c-orange'} style={{ width: 44, height: 44, borderRadius: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 14, flexShrink: 0 }}>
+        {initials(u.prenom, u.nom_initiale)}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {displayName(u)}
+          {u.role === 'admin' && <Badge color="gray">Admin</Badge>}
+          {!u.actif && <Badge color="red">Inactif</Badge>}
+          {u.must_change_pwd && <Badge color="amber">🔑</Badge>}
+          {u.equipes && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: '100px',
+              background: (u.equipes.couleur || '#FF7900') + '18',
+              color: u.equipes.couleur || '#FF7900',
+            }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: u.equipes.couleur || '#FF7900' }} />
+              {u.equipes.nom}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
+          <span className="mono">{u.identifiant}</span> · {nbSvc} service{nbSvc > 1 ? 's' : ''} · {nbMag} magasin{nbMag > 1 ? 's' : ''}
+        </div>
+      </div>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+    </button>
+  );
+}
+
+// ===== Vue groupée par équipe (sections repliables) =====
+function TeamGroupedView({ users, equipes, onUserClick }) {
+  const [collapsed, setCollapsed] = useState({});
+
+  // Construire les groupes : une section par équipe (avec membres) + "Sans équipe"
+  const groups = equipes
+    .map((eq) => ({
+      id: eq.id,
+      nom: eq.nom,
+      couleur: eq.couleur || '#FF7900',
+      membres: users.filter((u) => u.equipe_id === eq.id),
+    }))
+    .filter((g) => g.membres.length > 0);
+
+  const sansEquipe = users.filter((u) => !u.equipe_id);
+
+  if (groups.length === 0 && sansEquipe.length === users.length) {
+    // Aucune équipe n'a de membre : message d'aide
+    return (
+      <div>
+        <div style={{ padding: 14, background: 'var(--bg)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--ink-3)', fontWeight: 600, marginBottom: 12 }}>
+          Aucun utilisateur n'est encore affecté à une équipe. Utilisez « 👥 Gérer les équipes » ou éditez un utilisateur pour l'affecter.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sansEquipe.map((u) => <UserCard key={u.id} u={u} onClick={() => onUserClick(u)} />)}
+        </div>
+      </div>
+    );
+  }
+
+  function toggle(id) {
+    setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+  }
+
+  function Section({ id, nom, couleur, membres }) {
+    const isCollapsed = collapsed[id];
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => toggle(id)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+            padding: '10px 14px', background: 'white',
+            border: '1.5px solid var(--line)', borderLeft: `4px solid ${couleur}`,
+            borderRadius: 'var(--radius)', cursor: 'pointer', fontFamily: 'inherit',
+            marginBottom: isCollapsed ? 0 : 8,
+          }}
+        >
+          <span style={{ width: 12, height: 12, borderRadius: '50%', background: couleur, flexShrink: 0 }} />
+          <span style={{ fontWeight: 800, fontSize: 15, flex: 1, textAlign: 'left' }}>{nom}</span>
+          <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 700 }}>{membres.length} membre{membres.length > 1 ? 's' : ''}</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }}><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        {!isCollapsed && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 8 }}>
+            {membres.map((u) => <UserCard key={u.id} u={u} onClick={() => onUserClick(u)} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {groups.map((g) => <Section key={g.id} {...g} />)}
+      {sansEquipe.length > 0 && (
+        <Section id="__none__" nom="Sans équipe" couleur="var(--ink-4)" membres={sansEquipe} />
+      )}
+    </div>
   );
 }
 

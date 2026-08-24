@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { Denied, PageLoader, Empty, Badge } from '../components/ui';
 import { fmtRelative, displayName, fmtPrice, initials } from '../lib/helpers';
 import { fetchStatsKPIs, fetchTops, fetchEvolution, fetchRuptures, fetchCommandesEvolution } from '../hooks/useStats';
+import { fetchRegulTrends } from '../hooks/useInventaire';
 
 const PERIODS = [
   { id: 'week', label: 'Semaine' },
@@ -26,12 +27,13 @@ export default function Stats() {
   const [cmdEvo, setCmdEvo] = useState({ buckets: [], totalCout: 0, totalNb: 0, moyCout: 0 });
   const [ruptures, setRuptures] = useState([]);
   const [mouvements, setMouvements] = useState([]);
+  const [regul, setRegul] = useState({ byMonth: [], topArticles: [], total: 0 });
 
   const fetchAll = useCallback(async () => {
     if (!service || !magasin) return;
     setLoading(true);
 
-    const [k, t, e, ce, r, m] = await Promise.all([
+    const [k, t, e, ce, r, m, rg] = await Promise.all([
       fetchStatsKPIs({ service, magasin, period }),
       fetchTops({ service, magasin, period, limit: 5 }),
       fetchEvolution({ service, magasin, months: 12 }),
@@ -44,6 +46,7 @@ export default function Stats() {
         .eq('magasin_id', magasin)
         .order('created_at', { ascending: false })
         .limit(100),
+      fetchRegulTrends({ service, magasin, monthsBack: 12, topN: 10 }),
     ]);
 
     setKpis(k);
@@ -52,6 +55,7 @@ export default function Stats() {
     setCmdEvo(ce);
     setRuptures(r);
     setMouvements(m.data || []);
+    setRegul(rg && rg.ok ? rg : { byMonth: [], topArticles: [], total: 0 });
     setLoading(false);
   }, [service, magasin, period]);
 
@@ -105,6 +109,7 @@ export default function Stats() {
             <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '1px solid var(--line)' }}>
               {[
                 ['overview', '📊 Aperçu'],
+                ['regul', `🔧 Régul (${regul.total})`],
                 ['ruptures', `🔴 Ruptures (${ruptures.length})`],
                 ['journal', '📜 Journal'],
               ].map(([id, label]) => (
@@ -164,6 +169,10 @@ export default function Stats() {
                 {/* Synthèse des commandes */}
                 <CommandesSynthese data={cmdEvo} />
               </>
+            )}
+
+            {tab === 'regul' && (
+              <RegulSynthese data={regul} />
             )}
 
             {tab === 'ruptures' && (
@@ -517,6 +526,130 @@ function CommandesSynthese({ data }) {
               >{b.label}</div>
             ))}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Synthèse des régularisations =====
+function RegulSynthese({ data }) {
+  const { byMonth, topArticles, total } = data;
+
+  if (!total || total === 0) {
+    return <Empty icon="🔧" text="Aucune régularisation" sub="Les régularisations d'inventaire apparaîtront ici." />;
+  }
+
+  const maxCount = Math.max(...byMonth.map((m) => m.count), 1);
+  const maxNbRegul = Math.max(...topArticles.map((a) => a.nb_regul), 1);
+  const chartH = 220;
+
+  // Total sur les 12 mois affichés + moyenne mensuelle
+  const totalAffiche = byMonth.reduce((s, m) => s + m.count, 0);
+  const moisActifs = byMonth.filter((m) => m.count > 0).length || 1;
+  const moyenne = Math.round((totalAffiche / moisActifs) * 10) / 10;
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 4px' }}>
+        🔧 Synthèse des régularisations
+      </h2>
+      <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600, margin: '0 0 16px' }}>
+        Régularisations d'inventaire sur les 12 derniers mois (périmètre actif).
+      </p>
+
+      {/* KPI cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 20 }}>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--orange)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>🔧 Total régul</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--orange)' }}>{total}</div>
+        </div>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--blue)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>📊 Moyenne / mois</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--blue)' }}>{moyenne}</div>
+        </div>
+        <div style={{ padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--purple, #7C3AED)' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>📦 Articles concernés</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: 'var(--purple, #7C3AED)' }}>{topArticles.length}</div>
+        </div>
+      </div>
+
+      {/* Histogramme par mois */}
+      <div style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', padding: 16, marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 14 }}>Nombre de régularisations par mois</div>
+        <div style={{ position: 'relative', height: chartH, marginLeft: 32 }}>
+          {/* Axe Y */}
+          <div style={{ position: 'absolute', left: -30, top: 0, height: chartH - 28, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, alignItems: 'flex-end' }}>
+            <span>{maxCount}</span>
+            <span>{Math.round(maxCount * 0.5)}</span>
+            <span>0</span>
+          </div>
+          {/* Grille */}
+          {[0, 0.5, 1].map((p) => (
+            <div key={p} style={{ position: 'absolute', left: 0, right: 0, top: (chartH - 28) * (1 - p), borderTop: '1px dashed var(--line-2)' }} />
+          ))}
+          {/* Barres */}
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: chartH - 28, display: 'flex', alignItems: 'flex-end', gap: 4 }}>
+            {byMonth.map((m) => {
+              const h = (m.count / maxCount) * 100;
+              return (
+                <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                  {m.count > 0 && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--orange)', marginBottom: 2 }}>{m.count}</div>
+                  )}
+                  <div
+                    title={`${m.label} : ${m.count} régul`}
+                    style={{
+                      width: '100%',
+                      height: `${h}%`,
+                      minHeight: m.count > 0 ? 3 : 0,
+                      background: 'linear-gradient(180deg, var(--orange), #E66E00)',
+                      borderRadius: '4px 4px 0 0',
+                      transition: 'opacity 0.2s',
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {/* Labels X */}
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: -22, display: 'flex', gap: 4 }}>
+            {byMonth.map((m) => (
+              <div key={m.key} style={{ flex: 1, fontSize: 9, color: 'var(--ink-4)', fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Top articles les plus régularisés */}
+      <div style={{ background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', padding: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 14 }}>Articles les plus régularisés</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {topArticles.map((a, i) => {
+            const pct = (a.nb_regul / maxNbRegul) * 100;
+            return (
+              <div key={`${a.ref}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 22, fontSize: 13, fontWeight: 800, color: 'var(--ink-4)', textAlign: 'center', flexShrink: 0 }}>{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.nom}>{a.nom}</span>
+                    <span className="mono" style={{ fontSize: 13, fontWeight: 800, color: 'var(--orange)', flexShrink: 0 }}>{a.nb_regul} régul</span>
+                  </div>
+                  <div style={{ height: 6, background: 'var(--line-2)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, var(--orange), #E66E00)', borderRadius: 3 }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 3 }}>
+                    <span className="mono">{a.ref}</span>
+                    {a.total_ajout > 0 && <span style={{ color: 'var(--green)' }}> · +{a.total_ajout} ajouté</span>}
+                    {a.total_retrait > 0 && <span style={{ color: 'var(--red)' }}> · −{a.total_retrait} retiré</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

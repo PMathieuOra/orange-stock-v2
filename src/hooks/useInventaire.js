@@ -359,3 +359,58 @@ export async function fetchRegulStats({ service, magasin }) {
   // 4. Trier par nb_regul desc
   return Object.values(byUser).sort((a, b) => b.nb_regul - a.nb_regul);
 }
+
+// Tendances des régularisations : nombre par mois + top articles (par nombre de régul)
+// Périmètre : service + magasin actifs. Ne concerne que les consommables (seuls régularisés).
+export async function fetchRegulTrends({ service, magasin, monthsBack = 12, topN = 10 }) {
+  const { data: regs, error } = await supabase
+    .from('regularisations')
+    .select('ref, nom, ecart, created_at')
+    .eq('service_id', service)
+    .eq('magasin_id', magasin)
+    .order('created_at', { ascending: true });
+
+  if (error) return { ok: false, byMonth: [], topArticles: [], total: 0, error: error.message };
+  if (!regs || regs.length === 0) return { ok: true, byMonth: [], topArticles: [], total: 0 };
+
+  // --- 1. Regroupement par mois (les monthsBack derniers mois, y compris ceux à 0) ---
+  const now = new Date();
+  const monthKeys = [];
+  const monthLabels = {};
+  const MOIS = ['jan', 'fév', 'mar', 'avr', 'mai', 'juin', 'juil', 'août', 'sep', 'oct', 'nov', 'déc'];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    monthKeys.push(key);
+    monthLabels[key] = `${MOIS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`;
+  }
+  const countByMonth = {};
+  monthKeys.forEach((k) => { countByMonth[k] = 0; });
+
+  regs.forEach((r) => {
+    const d = new Date(r.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (key in countByMonth) countByMonth[key] += 1;
+  });
+
+  const byMonth = monthKeys.map((k) => ({ key: k, label: monthLabels[k], count: countByMonth[k] }));
+
+  // --- 2. Top articles par NOMBRE de régul (regroupé par ref+nom) ---
+  const byArticle = {};
+  regs.forEach((r) => {
+    const key = `${r.ref}|${r.nom}`;
+    if (!byArticle[key]) {
+      byArticle[key] = { ref: r.ref, nom: r.nom, nb_regul: 0, total_ajout: 0, total_retrait: 0 };
+    }
+    const a = byArticle[key];
+    a.nb_regul += 1;
+    if (r.ecart > 0) a.total_ajout += r.ecart;
+    else a.total_retrait += Math.abs(r.ecart);
+  });
+
+  const topArticles = Object.values(byArticle)
+    .sort((a, b) => b.nb_regul - a.nb_regul)
+    .slice(0, topN);
+
+  return { ok: true, byMonth, topArticles, total: regs.length };
+}
