@@ -42,20 +42,30 @@ export async function getOrCreateWeeklyInventory({ service, magasin, userId, nbI
     return loadInventoryWithChecks(existing.id);
   }
 
-  // 2. Tirage : récupérer tous les conso actifs avec leur usage (sorties des 30 derniers jours)
+  // 2. Tirage : récupérer tous les conso actifs ET tous les tourets du périmètre
   const date30 = new Date();
   date30.setDate(date30.getDate() - 30);
   const date30Iso = date30.toISOString();
 
-  const { data: articles } = await supabase
-    .from('articles_conso')
-    .select('id, ref, nom, qty, seuil')
-    .eq('service_id', service)
-    .eq('magasin_id', magasin)
-    .eq('actif', true);
+  const [consosRes, touretsRes] = await Promise.all([
+    supabase
+      .from('articles_conso')
+      .select('id, ref, nom, qty, seuil')
+      .eq('service_id', service)
+      .eq('magasin_id', magasin)
+      .eq('actif', true),
+    supabase
+      .from('tourets')
+      .select('id, ref_touret, restante, type_cable_id, types_cable!inner(ref_type, nom, service_id, magasin_id)')
+      .eq('types_cable.service_id', service)
+      .eq('types_cable.magasin_id', magasin),
+  ]);
 
-  if (!articles || articles.length === 0) {
-    return { ok: false, error: 'Aucun article actif dans ce périmètre.' };
+  const consos = consosRes.data || [];
+  const tourets = touretsRes.data || [];
+
+  if (consos.length === 0 && tourets.length === 0) {
+    return { ok: false, error: 'Aucun article ni touret dans ce périmètre.' };
   }
 
   // Récupérer les mouvements de sortie sur 30 jours pour calculer le poids
@@ -67,17 +77,28 @@ export async function getOrCreateWeeklyInventory({ service, magasin, userId, nbI
     .eq('type', 'sortie')
     .gte('created_at', date30Iso);
 
-  // Compteur d'usage par ref
   const usageByRef = {};
   (mouvs || []).forEach((m) => {
     usageByRef[m.ref] = (usageByRef[m.ref] || 0) + 1;
   });
 
-  // Calculer le poids de chaque article (usage + 1 pour éviter les zéros)
-  const weighted = articles.map((a) => ({
-    ...a,
-    weight: (usageByRef[a.ref] || 0) + 1,
-  }));
+  // Pool unifié : conso + tourets, avec un poids basé sur l'usage
+  const weighted = [
+    ...consos.map((a) => ({
+      item_type: 'conso',
+      article_id: a.id,
+      touret_id: null,
+      qty_theorique: a.qty,
+      weight: (usageByRef[a.ref] || 0) + 1,
+    })),
+    ...tourets.map((t) => ({
+      item_type: 'cable',
+      article_id: null,
+      touret_id: t.id,
+      qty_theorique: t.restante,
+      weight: (usageByRef[t.types_cable?.ref_type] || 0) + 1,
+    })),
+  ];
 
   // Tirage pondéré sans remise
   const picked = weightedRandomSample(weighted, Math.min(nbItems, weighted.length));
@@ -97,11 +118,13 @@ export async function getOrCreateWeeklyInventory({ service, magasin, userId, nbI
 
   if (errInv) return { ok: false, error: errInv.message };
 
-  // 4. Créer les checks pour les items tirés
-  const checksPayload = picked.map((a) => ({
+  // 4. Créer les checks pour les items tirés (conso ou touret)
+  const checksPayload = picked.map((p) => ({
     inventaire_id: inv.id,
-    article_id: a.id,
-    qty_theorique: a.qty,
+    item_type: p.item_type,
+    article_id: p.article_id,
+    touret_id: p.touret_id,
+    qty_theorique: p.qty_theorique,
   }));
 
   const { error: errChecks } = await supabase
@@ -131,20 +154,41 @@ async function loadInventoryWithChecks(inventaireId) {
     return { ok: true, inventaire: inv, checks: [] };
   }
 
-  // Récupérer les infos des articles
-  const articleIds = checks.map((c) => c.article_id);
-  const { data: articles } = await supabase
-    .from('articles_conso')
-    .select('id, ref, nom, qty, seuil, emplacement')
-    .in('id', articleIds);
+  // Enrichir les checks selon leur type (conso ou câble/touret)
+  const consoIds = checks.filter((c) => c.item_type !== 'cable' && c.article_id).map((c) => c.article_id);
+  const touretIds = checks.filter((c) => c.item_type === 'cable' && c.touret_id).map((c) => c.touret_id);
+
+  const [consosRes, touretsRes] = await Promise.all([
+    consoIds.length > 0
+      ? supabase.from('articles_conso').select('id, ref, nom, qty, seuil, emplacement').in('id', consoIds)
+      : Promise.resolve({ data: [] }),
+    touretIds.length > 0
+      ? supabase.from('tourets').select('id, ref_touret, restante, emplacement, types_cable(ref_type, nom)').in('id', touretIds)
+      : Promise.resolve({ data: [] }),
+  ]);
 
   const articleMap = {};
-  (articles || []).forEach((a) => { articleMap[a.id] = a; });
+  (consosRes.data || []).forEach((a) => { articleMap[a.id] = a; });
+  const touretMap = {};
+  (touretsRes.data || []).forEach((t) => { touretMap[t.id] = t; });
 
-  const enrichedChecks = checks.map((c) => ({
-    ...c,
-    article: articleMap[c.article_id] || null,
-  }));
+  const enrichedChecks = checks.map((c) => {
+    if (c.item_type === 'cable') {
+      const t = touretMap[c.touret_id];
+      return {
+        ...c,
+        article: t ? {
+          id: t.id,
+          ref: t.types_cable?.ref_type || t.ref_touret,
+          nom: `${t.types_cable?.nom || 'Câble'} · touret ${t.ref_touret}`,
+          qty: t.restante,
+          emplacement: t.emplacement,
+          unite: 'm',
+        } : null,
+      };
+    }
+    return { ...c, article: articleMap[c.article_id] || null };
+  });
 
   return { ok: true, inventaire: inv, checks: enrichedChecks };
 }
@@ -195,28 +239,52 @@ export async function validateInventoryCheck({ checkId, qtyComptee, userId, regu
     .eq('id', checkId);
   if (e1) return { ok: false, error: e1.message };
 
-  // 3. Si écart et regulariser demandé : appliquer la régul
+  // 3. Si écart et regulariser demandé : appliquer la régul (conso ou touret)
   if (ecart !== 0 && regulariser) {
-    // Charger l'article pour son ref/nom actuels
-    const { data: article } = await supabase
-      .from('articles_conso')
-      .select('id, ref, nom, qty')
-      .eq('id', check.article_id)
-      .single();
+    const svc = check.inventaires_hebdo.service_id;
+    const mag = check.inventaires_hebdo.magasin_id;
 
-    if (article) {
-      // Mettre à jour le stock
-      await supabase
+    if (check.item_type === 'cable' && check.touret_id) {
+      // Régul d'un touret
+      const { data: touret } = await supabase
+        .from('tourets')
+        .select('id, ref_touret, restante, types_cable(ref_type, nom)')
+        .eq('id', check.touret_id)
+        .single();
+
+      if (touret) {
+        await supabase.from('tourets').update({ restante: qty }).eq('id', check.touret_id);
+        await supabase.from('regularisations').insert({
+          service_id: svc,
+          magasin_id: mag,
+          item_type: 'cable',
+          touret_id: check.touret_id,
+          article_id: null,
+          ref: touret.types_cable?.ref_type || touret.ref_touret,
+          nom: `${touret.types_cable?.nom || 'Câble'} · touret ${touret.ref_touret}`,
+          qty_avant: check.qty_theorique,
+          qty_apres: qty,
+          ecart,
+          motif: 'Inventaire hebdomadaire',
+          source: 'inventaire',
+          inventaire_id: check.inventaire_id,
+          cree_par: userId,
+        });
+      }
+    } else {
+      // Régul d'un consommable
+      const { data: article } = await supabase
         .from('articles_conso')
-        .update({ qty })
-        .eq('id', check.article_id);
+        .select('id, ref, nom, qty')
+        .eq('id', check.article_id)
+        .single();
 
-      // Enregistrer la régul
-      await supabase
-        .from('regularisations')
-        .insert({
-          service_id: check.inventaires_hebdo.service_id,
-          magasin_id: check.inventaires_hebdo.magasin_id,
+      if (article) {
+        await supabase.from('articles_conso').update({ qty }).eq('id', check.article_id);
+        await supabase.from('regularisations').insert({
+          service_id: svc,
+          magasin_id: mag,
+          item_type: 'conso',
           article_id: check.article_id,
           ref: article.ref,
           nom: article.nom,
@@ -228,6 +296,7 @@ export async function validateInventoryCheck({ checkId, qtyComptee, userId, regu
           inventaire_id: check.inventaire_id,
           cree_par: userId,
         });
+      }
     }
   }
 
@@ -278,7 +347,53 @@ export async function createRegularisation({ articleId, qtyApres, motif, userId,
   return { ok: true, ecart };
 }
 
-// Liste les régularisations du scope, triées par date desc
+// Régularise la longueur restante d'un touret précis
+export async function createTouretRegularisation({ touretId, longueurApres, motif, userId, service, magasin }) {
+  // 1. Charger le touret + le type de câble parent (pour ref/nom)
+  const { data: touret, error: e0 } = await supabase
+    .from('tourets')
+    .select('id, ref_touret, restante, type_cable_id, types_cable(ref_type, nom)')
+    .eq('id', touretId)
+    .single();
+  if (e0 || !touret) return { ok: false, error: 'Touret introuvable' };
+
+  const longueur = parseInt(longueurApres);
+  if (isNaN(longueur) || longueur < 0) return { ok: false, error: 'Longueur invalide' };
+  if (longueur === touret.restante) return { ok: false, error: 'Aucun changement' };
+
+  const ecart = longueur - touret.restante;
+  const nomCable = touret.types_cable?.nom || 'Câble';
+  const refCable = touret.types_cable?.ref_type || touret.ref_touret;
+
+  // 2. Mettre à jour la longueur restante du touret
+  const { error: e1 } = await supabase
+    .from('tourets')
+    .update({ restante: longueur })
+    .eq('id', touretId);
+  if (e1) return { ok: false, error: e1.message };
+
+  // 3. Enregistrer la régul (item_type = 'cable', touret_id renseigné)
+  const { error: e2 } = await supabase
+    .from('regularisations')
+    .insert({
+      service_id: service,
+      magasin_id: magasin,
+      item_type: 'cable',
+      touret_id: touretId,
+      article_id: null,
+      ref: refCable,
+      nom: `${nomCable} · touret ${touret.ref_touret}`,
+      qty_avant: touret.restante,
+      qty_apres: longueur,
+      ecart,
+      motif: motif?.trim() || null,
+      source: 'manual',
+      cree_par: userId,
+    });
+  if (e2) return { ok: false, error: e2.message };
+
+  return { ok: true, ecart };
+}
 export async function fetchRegularisations({ service, magasin, limit = 50 }) {
   // 1. Récupérer les régul
   const { data, error } = await supabase

@@ -5,11 +5,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
 import { useToast } from '../contexts/ToastContext';
 import { Button, Badge, PageLoader, Empty, Denied } from '../components/ui';
-import { fetchConsos } from '../hooks/useArticles';
+import { fetchConsos, fetchCables, fetchAllTouretsForScope } from '../hooks/useArticles';
 import {
   getOrCreateWeeklyInventory,
   validateInventoryCheck,
   createRegularisation,
+  createTouretRegularisation,
   fetchRegularisations,
   fetchRegulStats,
   getCurrentWeek,
@@ -293,6 +294,11 @@ function CheckCard({ check, userId, onRefresh, toast }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Badge color={check.item_type === 'cable' ? 'blue' : 'orange'}>
+              {check.item_type === 'cable' ? '🔌 Câble' : '📦 Conso'}
+            </Badge>
+          </div>
           <div title={article.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {article.nom}
           </div>
@@ -308,7 +314,7 @@ function CheckCard({ check, userId, onRefresh, toast }) {
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase' }}>Théorique</div>
-          <div className="mono" style={{ fontSize: 18, fontWeight: 800 }}>{check.qty_theorique}</div>
+          <div className="mono" style={{ fontSize: 18, fontWeight: 800 }}>{check.qty_theorique}{check.item_type === 'cable' ? 'm' : ''}</div>
         </div>
       </div>
 
@@ -373,167 +379,189 @@ function CheckCard({ check, userId, onRefresh, toast }) {
 // Onglet RÉGULARISATIONS MANUELLES
 // ============================================================================
 function RegulTab({ service, magasin, userId, onDone, toast }) {
-  const [articles, setArticles] = useState([]);
+  const [itemType, setItemType] = useState('conso'); // 'conso' | 'cable'
+  const [consos, setConsos] = useState([]);
+  const [tourets, setTourets] = useState([]); // liste à plat des tourets du périmètre
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [newQty, setNewQty] = useState('');
+  const [selected, setSelected] = useState(null); // { kind, ...data }
+  const [newVal, setNewVal] = useState('');
   const [motif, setMotif] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchConsos(service, magasin).then((r) => setArticles((r.data || []).filter((a) => a.actif)));
+  const loadData = useCallback(() => {
+    fetchConsos(service, magasin).then((r) => setConsos((r.data || []).filter((a) => a.actif)));
+    // Charger les câbles + leurs tourets, aplatis
+    Promise.all([fetchCables(service, magasin), fetchAllTouretsForScope(service, magasin)]).then(([cablesRes, touretsRes]) => {
+      const cables = cablesRes.data || [];
+      const cableById = {};
+      cables.forEach((c) => { cableById[c.id] = c; });
+      const byCable = touretsRes.byCable || {};
+      const flat = [];
+      Object.keys(byCable).forEach((cableId) => {
+        const cable = cableById[cableId];
+        (byCable[cableId] || []).forEach((t) => {
+          flat.push({
+            touret_id: t.id,
+            ref_touret: t.ref_touret,
+            restante: t.restante,
+            emplacement: t.emplacement,
+            nom_cable: cable?.nom || 'Câble',
+            ref_cable: cable?.ref_type || '',
+            categorie: cable?.categorie || '',
+          });
+        });
+      });
+      setTourets(flat);
+    });
   }, [service, magasin]);
 
+  useEffect(() => { loadData(); }, [loadData]);
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return articles.slice(0, 50);
     const q = search.toLowerCase().trim();
-    return articles.filter((a) => (a.ref + ' ' + a.nom).toLowerCase().includes(q)).slice(0, 50);
-  }, [articles, search]);
+    if (itemType === 'conso') {
+      if (!q) return consos;
+      return consos.filter((a) => (a.ref + ' ' + a.nom).toLowerCase().includes(q));
+    }
+    if (!q) return tourets;
+    return tourets.filter((t) => (t.ref_touret + ' ' + t.nom_cable + ' ' + t.ref_cable).toLowerCase().includes(q));
+  }, [itemType, consos, tourets, search]);
 
   async function submit() {
     if (!selected) return;
-    if (newQty === '' || isNaN(parseInt(newQty))) return toast('Quantité invalide', 'error');
+    if (newVal === '' || isNaN(parseInt(newVal))) return toast('Valeur invalide', 'error');
     setSaving(true);
-    const res = await createRegularisation({
-      articleId: selected.id,
-      qtyApres: newQty,
-      motif,
-      userId,
-      service,
-      magasin,
-    });
+    let res;
+    if (selected.kind === 'conso') {
+      res = await createRegularisation({ articleId: selected.id, qtyApres: newVal, motif, userId, service, magasin });
+    } else {
+      res = await createTouretRegularisation({ touretId: selected.touret_id, longueurApres: newVal, motif, userId, service, magasin });
+    }
     setSaving(false);
     if (res.ok) {
-      toast(`✓ Régul appliquée (${res.ecart > 0 ? '+' : ''}${res.ecart})`, 'success');
-      setSelected(null);
-      setNewQty('');
-      setMotif('');
-      // Recharger la liste pour avoir la qty à jour
-      fetchConsos(service, magasin).then((r) => setArticles((r.data || []).filter((a) => a.actif)));
+      toast(`✓ Régul appliquée (${res.ecart > 0 ? '+' : ''}${res.ecart}${selected.kind === 'cable' ? 'm' : ''})`, 'success');
+      setSelected(null); setNewVal(''); setMotif('');
+      loadData();
       onDone();
     } else {
       toast('Erreur : ' + res.error, 'error');
     }
   }
 
+  // ----- Vue formulaire (article/touret sélectionné) -----
   if (selected) {
-    const ecart = newQty !== '' ? parseInt(newQty) - selected.qty : null;
+    const isCable = selected.kind === 'cable';
+    const currentVal = isCable ? selected.restante : selected.qty;
+    const unite = isCable ? 'm' : '';
+    const ecart = newVal !== '' ? parseInt(newVal) - currentVal : null;
+    const titre = isCable ? `${selected.nom_cable} · touret ${selected.ref_touret}` : selected.nom;
+    const refAff = isCable ? selected.ref_cable || selected.ref_touret : selected.ref;
+    const empl = selected.emplacement;
     return (
       <div style={{ maxWidth: 500, margin: '0 auto' }}>
-        <button onClick={() => { setSelected(null); setNewQty(''); setMotif(''); }} style={backBtn}>← Choisir un autre article</button>
+        <button onClick={() => { setSelected(null); setNewVal(''); setMotif(''); }} style={backBtn}>← Choisir un autre article</button>
 
-        <div style={{ marginTop: 16, padding: '20px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: '4px solid var(--blue)' }}>
-          <div style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-            ⚖️ Régulariser le stock
+        <div style={{ marginTop: 16, padding: '20px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', borderLeft: `4px solid ${isCable ? 'var(--blue)' : 'var(--orange)'}` }}>
+          <div style={{ fontSize: 11, color: isCable ? 'var(--blue)' : 'var(--orange)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+            ⚖️ Régulariser {isCable ? 'un touret' : 'le stock'}
           </div>
-          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2 }}>{selected.nom}</div>
+          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2 }}>{titre}</div>
           <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginBottom: 16, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <span className="mono">{selected.ref}</span>
-            {selected.emplacement && (
-              <>
-                <span>·</span>
-                <span style={{ color: 'var(--orange)' }}>📍 {selected.emplacement}</span>
-              </>
-            )}
+            <span className="mono">{refAff}</span>
+            {empl && (<><span>·</span><span style={{ color: 'var(--orange)' }}>📍 {empl}</span></>)}
           </div>
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
             <div style={{ flex: 1, padding: 14, background: 'var(--bg)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase' }}>Stock actuel</div>
-              <div className="mono" style={{ fontSize: 22, fontWeight: 800 }}>{selected.qty}</div>
+              <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase' }}>{isCable ? 'Longueur actuelle' : 'Stock actuel'}</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 800 }}>{currentVal}{unite}</div>
             </div>
             <div style={{ fontSize: 24 }}>→</div>
             <div style={{ flex: 1, padding: 14, background: 'var(--orange-light)', borderRadius: 'var(--radius-sm)', textAlign: 'center', border: '1.5px solid var(--orange)' }}>
-              <div style={{ fontSize: 10, color: 'var(--orange-dark)', fontWeight: 700, textTransform: 'uppercase' }}>Nouveau stock</div>
-              <input
-                type="number"
-                min="0"
-                value={newQty}
-                onChange={(e) => setNewQty(e.target.value)}
-                placeholder="?"
-                style={{ width: '100%', border: 'none', background: 'transparent', fontFamily: 'JetBrains Mono, monospace', fontSize: 22, fontWeight: 800, textAlign: 'center', outline: 'none', color: 'var(--orange-dark)' }}
-              />
+              <div style={{ fontSize: 10, color: 'var(--orange-dark)', fontWeight: 700, textTransform: 'uppercase' }}>{isCable ? 'Nouvelle longueur' : 'Nouveau stock'}</div>
+              <input type="number" min="0" value={newVal} onChange={(e) => setNewVal(e.target.value)} placeholder="?" style={{ width: '100%', border: 'none', background: 'transparent', fontFamily: 'JetBrains Mono, monospace', fontSize: 22, fontWeight: 800, textAlign: 'center', outline: 'none', color: 'var(--orange-dark)' }} />
             </div>
           </div>
 
           {ecart !== null && ecart !== 0 && (
             <div style={{ padding: '10px 14px', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', marginBottom: 12, textAlign: 'center', fontSize: 13, fontWeight: 700 }}>
-              Écart : <span className="mono" style={{ color: ecart > 0 ? 'var(--green)' : 'var(--red)', fontWeight: 800 }}>{ecart > 0 ? '+' : ''}{ecart}</span>
+              Écart : <span className="mono" style={{ color: ecart > 0 ? 'var(--green)' : 'var(--red)', fontWeight: 800 }}>{ecart > 0 ? '+' : ''}{ecart}{unite}</span>
             </div>
           )}
 
           <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'block' }}>
-              Motif (optionnel)
-            </label>
-            <input
-              type="text"
-              value={motif}
-              onChange={(e) => setMotif(e.target.value)}
-              placeholder="Ex: stock cassé, erreur de saisie..."
-              style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600, outline: 'none', fontSize: 13 }}
-            />
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'block' }}>Motif (optionnel)</label>
+            <input type="text" value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Ex: stock cassé, erreur de saisie..." style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit', fontWeight: 600, outline: 'none', fontSize: 13 }} />
           </div>
 
           <div style={{ display: 'flex', gap: 10 }}>
-            <Button variant="secondary" onClick={() => { setSelected(null); setNewQty(''); setMotif(''); }} style={{ flex: 1 }}>Annuler</Button>
-            <Button onClick={submit} disabled={saving || newQty === '' || ecart === 0} style={{ flex: 1 }}>
-              {saving ? '...' : '✓ Régulariser'}
-            </Button>
+            <Button variant="secondary" onClick={() => { setSelected(null); setNewVal(''); setMotif(''); }} style={{ flex: 1 }}>Annuler</Button>
+            <Button onClick={submit} disabled={saving || newVal === '' || ecart === 0} style={{ flex: 1 }}>{saving ? '...' : '✓ Régulariser'}</Button>
           </div>
         </div>
       </div>
     );
   }
 
+  // ----- Vue liste (sélecteur type + recherche + grille) -----
   return (
     <div>
+      {/* Sélecteur conso / câble */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {[['conso', '📦 Consommables'], ['cable', '🔌 Câbles (tourets)']].map(([id, label]) => (
+          <button key={id} onClick={() => { setItemType(id); setSearch(''); }} style={{
+            flex: 1, padding: '10px 14px',
+            background: itemType === id ? (id === 'cable' ? 'var(--blue)' : 'var(--orange)') : 'white',
+            color: itemType === id ? 'white' : 'var(--ink-3)',
+            border: `1.5px solid ${itemType === id ? (id === 'cable' ? 'var(--blue)' : 'var(--orange)') : 'var(--line)'}`,
+            borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+          }}>{label}</button>
+        ))}
+      </div>
+
       <input
-        placeholder="🔍 Rechercher un article à régulariser..."
+        placeholder={itemType === 'conso' ? '🔍 Rechercher un consommable...' : '🔍 Rechercher un touret (n° touret, câble...)'}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         style={{ width: '100%', padding: '12px 16px', border: '1.5px solid var(--line)', borderRadius: '100px', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, outline: 'none', marginBottom: 16 }}
       />
 
       {filtered.length === 0 ? (
-        <Empty icon="📦" text="Aucun article" sub={search ? 'Essayez un autre terme.' : 'Aucun article actif.'} />
+        <Empty icon={itemType === 'conso' ? '📦' : '🔌'} text="Aucun élément" sub={search ? 'Essayez un autre terme.' : (itemType === 'conso' ? 'Aucun consommable actif.' : 'Aucun touret dans ce périmètre.')} />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 8 }}>
-          {filtered.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => { setSelected(a); setNewQty(String(a.qty)); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '14px 16px',
-                background: 'white',
-                border: '1.5px solid var(--line)',
-                borderRadius: 'var(--radius)',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                width: '100%',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--blue)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--line)'; }}
-            >
+          {itemType === 'conso' ? filtered.map((a) => (
+            <button key={a.id} onClick={() => { setSelected({ kind: 'conso', ...a }); setNewVal(String(a.qty)); }}
+              style={regulCardStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--orange)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--line)'; }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div title={a.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nom}</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <span className="mono">{a.ref}</span>
-                  {a.emplacement && (
-                    <>
-                      <span>·</span>
-                      <span style={{ color: 'var(--orange)' }}>📍 {a.emplacement}</span>
-                    </>
-                  )}
+                  {a.emplacement && (<><span>·</span><span style={{ color: 'var(--orange)' }}>📍 {a.emplacement}</span></>)}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div className="mono" style={{ fontSize: 16, fontWeight: 800 }}>{a.qty}</div>
                 <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase' }}>en stock</div>
+              </div>
+            </button>
+          )) : filtered.map((t) => (
+            <button key={t.touret_id} onClick={() => { setSelected({ kind: 'cable', ...t }); setNewVal(String(t.restante)); }}
+              style={regulCardStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--blue)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--line)'; }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div title={t.nom_cable} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nom_cable}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="mono">touret {t.ref_touret}</span>
+                  {t.emplacement && (<><span>·</span><span style={{ color: 'var(--orange)' }}>📍 {t.emplacement}</span></>)}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 800 }}>{t.restante}m</div>
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 700, textTransform: 'uppercase' }}>restant</div>
               </div>
             </button>
           ))}
@@ -542,6 +570,13 @@ function RegulTab({ service, magasin, userId, onDone, toast }) {
     </div>
   );
 }
+
+const regulCardStyle = {
+  display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px',
+  background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)',
+  cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%',
+};
+
 
 // ============================================================================
 // Onglet HISTORIQUE
