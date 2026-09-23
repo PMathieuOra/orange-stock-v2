@@ -16,12 +16,15 @@ export function useStock() {
     setLoading(true);
     setError(null);
 
-    const [stockRes, touretsRes] = await Promise.all([
+    const [stockRes, touretsRes, photosRes] = await Promise.all([
       supabase.from('v_stock_consolide').select('*')
         .in('service_id', servicesList).eq('magasin_id', magasin).order('nom'),
       supabase.from('tourets')
         .select('id, ref_touret, initiale, restante, emplacement, type_cable_id, types_cable!inner(service_id, magasin_id, ref_type)')
         .in('types_cable.service_id', servicesList).eq('types_cable.magasin_id', magasin),
+      // Photos des consommables (chargées à part pour ne pas dépendre de la vue)
+      supabase.from('articles_conso').select('ref, service_id, photo_url')
+        .in('service_id', servicesList).eq('magasin_id', magasin).not('photo_url', 'is', null),
     ]);
 
     if (stockRes.error) {
@@ -40,8 +43,15 @@ export function useStock() {
       });
     });
 
-    const enriched = stockItems.map((it) => it.type === 'cable'
-      ? { ...it, tourets: touretsByCableId[it.id] || [] } : it);
+    // Index des photos par (service_id, ref)
+    const photoByKey = {};
+    (photosRes.data || []).forEach((p) => { photoByKey[`${p.service_id}|${p.ref}`] = p.photo_url; });
+
+    const enriched = stockItems.map((it) => {
+      if (it.type === 'cable') return { ...it, tourets: touretsByCableId[it.id] || [] };
+      // conso : rattacher la photo si elle existe
+      return { ...it, photo_url: it.photo_url || photoByKey[`${it.service_id}|${it.ref}`] || null };
+    });
 
     setItems(enriched);
     setLoading(false);

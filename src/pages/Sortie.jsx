@@ -4,7 +4,7 @@ import { useStock } from '../hooks/useStock';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
-import { PageLoader, Empty, Badge, Button, TruncatedName } from '../components/ui';
+import { PageLoader, Empty, Badge, Button, TruncatedName, PhotoPreview } from '../components/ui';
 import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
 import { touretStatus } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
@@ -273,6 +273,13 @@ export default function Sortie() {
                         letterSpacing: '0.05em',
                       }}>{catBadge.label}</span>}
                       <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{it.nom}</TruncatedName>
+                      {it.type === 'conso' && it.photo_url && (
+                        <PhotoPreview
+                          photoUrl={it.photo_url}
+                          alt={it.nom}
+                          trigger={<span style={{ fontSize: 15, lineHeight: 1 }} title="Voir la photo">📷</span>}
+                        />
+                      )}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="mono">{it.ref}</span>

@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { useStock, usePendingOrders } from '../hooks/useStock';
 import { useSession } from '../contexts/SessionContext';
-import { PageLoader, Empty, Badge, TruncatedName } from '../components/ui';
+import { PageLoader, Empty, Badge, TruncatedName, PhotoPreview } from '../components/ui';
 import { fmtDate, fmtRelative } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
 
@@ -299,6 +299,13 @@ function ConsoItem({ item, showServiceBadge = false }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
           {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
           <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{item.nom}</TruncatedName>
+          {item.photo_url && (
+            <PhotoPreview
+              photoUrl={item.photo_url}
+              alt={item.nom}
+              trigger={<span style={{ fontSize: 15, lineHeight: 1 }} title="Voir la photo">📷</span>}
+            />
+          )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <span className="mono">{item.ref}</span>

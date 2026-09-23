@@ -28,6 +28,68 @@ export function TruncatedName({ children, style = {}, as = 'div', ...props }) {
   );
 }
 
+// Affiche un aperçu photo au survol (PC) et au tap (mobile).
+// `trigger` est l'élément déclencheur (icône, zone…). Si pas de photoUrl, rend juste le trigger sans interaction.
+export function PhotoPreview({ photoUrl, trigger, alt = '' }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('touchstart', onDocClick);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('touchstart', onDocClick);
+    };
+  }, [open]);
+
+  if (!photoUrl) return trigger || null;
+
+  return (
+    <span
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <span
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+      >
+        {trigger}
+      </span>
+      {open && (
+        <span
+          onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 8px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 80,
+            background: 'white',
+            padding: 6,
+            borderRadius: 'var(--radius)',
+            border: '1.5px solid var(--line)',
+            boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.18))',
+            pointerEvents: 'auto',
+          }}
+        >
+          <img
+            src={photoUrl}
+            alt={alt}
+            style={{ display: 'block', width: 180, height: 180, objectFit: 'cover', borderRadius: 6 }}
+          />
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function Button({ variant = 'primary', children, className = '', ...props }) {
   const base = {
     display: 'inline-flex',
