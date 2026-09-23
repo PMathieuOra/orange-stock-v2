@@ -52,7 +52,7 @@ export function PhotoPreview({ photoUrl, trigger, alt = '' }) {
   return (
     <span
       ref={wrapRef}
-      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+      style={{ display: 'inline-flex', alignItems: 'center' }}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
@@ -63,28 +63,35 @@ export function PhotoPreview({ photoUrl, trigger, alt = '' }) {
         {trigger}
       </span>
       {open && (
-        <span
+        <div
           onClick={(e) => { e.stopPropagation(); setOpen(false); }}
           style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 8px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 80,
-            background: 'white',
-            padding: 6,
-            borderRadius: 'var(--radius)',
-            border: '1.5px solid var(--line)',
-            boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.18))',
-            pointerEvents: 'auto',
+            position: 'fixed',
+            inset: 0,
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.4)',
+            padding: 20,
+            cursor: 'zoom-out',
           }}
         >
           <img
             src={photoUrl}
             alt={alt}
-            style={{ display: 'block', width: 180, height: 180, objectFit: 'cover', borderRadius: 6 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: 'block',
+              maxWidth: 'min(90vw, 480px)',
+              maxHeight: '80vh',
+              objectFit: 'contain',
+              borderRadius: 'var(--radius)',
+              background: 'white',
+              boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.25))',
+            }}
           />
-        </span>
+        </div>
       )}
     </span>
   );
