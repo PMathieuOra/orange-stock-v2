@@ -15,6 +15,7 @@ import Articles from './pages/Articles';
 import Utilisateurs from './pages/Utilisateurs';
 import Magasins from './pages/Magasins';
 import Inventaire from './pages/Inventaire';
+import Profil from './pages/Profil';
 
 // Route protégée : redirige vers /login si pas connecté
 function Protected({ children }) {
@@ -30,6 +31,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/sortie" replace /> : <Login />} />
+      <Route path="/profil" element={<Protected><Profil /></Protected>} />
       <Route path="/sortie" element={<Protected><Sortie /></Protected>} />
       <Route path="/entree" element={<Protected><Entree /></Protected>} />
       <Route path="/stock" element={<Protected><Stock /></Protected>} />

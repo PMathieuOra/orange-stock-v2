@@ -1,4 +1,32 @@
 // Kit de composants UI réutilisables, style des prototypes
+import { useState, useRef } from 'react';
+
+// Nom tronqué qui révèle le nom complet au survol (desktop) ET au tap (mobile).
+// Au tap, le nom se déplie sur place ; re-tap le retronque.
+export function TruncatedName({ children, style = {}, as = 'div', ...props }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = typeof children === 'string' ? children : '';
+  const Tag = as;
+
+  const base = expanded
+    ? { whiteSpace: 'normal', wordBreak: 'break-word' }
+    : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
+  return (
+    <Tag
+      title={text}
+      onClick={(e) => {
+        // Ne pas déclencher l'action de la carte parente juste pour lire le nom
+        e.stopPropagation();
+        setExpanded((v) => !v);
+      }}
+      style={{ cursor: 'pointer', ...base, ...style }}
+      {...props}
+    >
+      {children}
+    </Tag>
+  );
+}
 
 export function Button({ variant = 'primary', children, className = '', ...props }) {
   const base = {

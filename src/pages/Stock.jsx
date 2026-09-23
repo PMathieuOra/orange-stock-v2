@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { useStock, usePendingOrders } from '../hooks/useStock';
 import { useSession } from '../contexts/SessionContext';
-import { PageLoader, Empty, Badge } from '../components/ui';
+import { PageLoader, Empty, Badge, TruncatedName } from '../components/ui';
 import { fmtDate, fmtRelative } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
 
@@ -298,7 +298,7 @@ function ConsoItem({ item, showServiceBadge = false }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
           {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
-          <div title={item.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+          <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{item.nom}</TruncatedName>
         </div>
         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <span className="mono">{item.ref}</span>
@@ -340,7 +340,7 @@ function CableItem({ item, showServiceBadge = false }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
             {showServiceBadge && <ServiceBadge serviceId={item.service_id} />}
-            <div title={item.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nom}</div>
+            <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{item.nom}</TruncatedName>
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
             <span className="mono">{item.ref || '—'}</span>
@@ -641,9 +641,9 @@ function CriticalModal({ items, pendingItems, onClose }) {
                             borderRadius: 4,
                             letterSpacing: '0.05em',
                           }}>{catBadge.label}</span>}
-                          <div title={it.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>
                             {it.nom}
-                          </div>
+                          </TruncatedName>
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
                           <span className="mono">{it.ref || '—'}</span> · seuil {it.seuil}{it.type === 'cable' ? 'm' : ''}

@@ -4,7 +4,7 @@ import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
 import { useToast } from '../contexts/ToastContext';
-import { Button, Badge, PageLoader, Empty, Denied } from '../components/ui';
+import { Button, Badge, PageLoader, Empty, Denied, TruncatedName } from '../components/ui';
 import { fetchConsos, fetchCables, fetchAllTouretsForScope } from '../hooks/useArticles';
 import {
   getOrCreateWeeklyInventory,
@@ -299,9 +299,9 @@ function CheckCard({ check, userId, onRefresh, toast }) {
               {check.item_type === 'cable' ? '🔌 Câble' : '📦 Conso'}
             </Badge>
           </div>
-          <div title={article.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>
             {article.nom}
-          </div>
+          </TruncatedName>
           <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <span className="mono">{article.ref}</span>
             {article.emplacement && (
@@ -536,7 +536,7 @@ function RegulTab({ service, magasin, userId, onDone, toast }) {
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--orange)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--line)'; }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div title={a.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nom}</div>
+                <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{a.nom}</TruncatedName>
                 <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <span className="mono">{a.ref}</span>
                   {a.emplacement && (<><span>·</span><span style={{ color: 'var(--orange)' }}>📍 {a.emplacement}</span></>)}

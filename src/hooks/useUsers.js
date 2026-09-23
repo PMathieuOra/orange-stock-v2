@@ -51,7 +51,7 @@ function pickAvatarColor(existingUsers) {
 }
 
 // Crée un utilisateur
-export async function createUser({ prenom, initiale, role, services, magasins, equipeId, allUsers = [] }) {
+export async function createUser({ prenom, initiale, role, services, magasins, equipeId, trigramme, allUsers = [] }) {
   if (!prenom || !prenom.trim()) return { ok: false, error: 'Prénom requis' };
   if (!initiale || !initiale.trim()) return { ok: false, error: 'Initiale du nom requise' };
   if (!services || !services.length) return { ok: false, error: 'Au moins un service requis' };
@@ -76,6 +76,7 @@ export async function createUser({ prenom, initiale, role, services, magasins, e
       actif: true,
       avatar_couleur: avatarColor,
       equipe_id: equipeId || null,
+      trigramme: trigramme ? trigramme.trim().toUpperCase() : null,
     })
     .select()
     .single();
@@ -96,12 +97,13 @@ export async function createUser({ prenom, initiale, role, services, magasins, e
 }
 
 // Met à jour un utilisateur (sauf identifiant et password)
-export async function updateUser(userId, { prenom, initiale, role, services, magasins, equipeId }) {
+export async function updateUser(userId, { prenom, initiale, role, services, magasins, equipeId, trigramme }) {
   const updates = {};
   if (prenom !== undefined) updates.prenom = prenom.trim();
   if (initiale !== undefined) updates.nom_initiale = initiale.trim().toUpperCase();
   if (role !== undefined) updates.role = role;
   if (equipeId !== undefined) updates.equipe_id = equipeId || null;
+  if (trigramme !== undefined) updates.trigramme = trigramme ? trigramme.trim().toUpperCase() : null;
 
   if (Object.keys(updates).length) {
     const { error } = await supabase.from('users').update(updates).eq('id', userId);

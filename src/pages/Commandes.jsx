@@ -337,7 +337,7 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
 
   return (
     <Layout brandTitle="Réception" brandSub="Administration">
-      <div style={{ padding: '16px 20px', paddingBottom: 100 }}>
+      <div style={{ padding: '16px 20px', paddingBottom: 160 }}>
         <button onClick={onCancel} style={backBtn}>← Détail</button>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', margin: '12px 0 4px' }}>Réceptionner</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}><span className="mono">{commande.numero}</span> — saisissez les quantités reçues.</p>
@@ -364,6 +364,7 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
 
       {/* Barre d'action sticky en bas */}
       <div
+        className="action-bar-bottom"
         style={{
           position: 'fixed',
           bottom: 0,
@@ -374,7 +375,7 @@ function ReceptionForm({ commande, userId, onCancel, onDone, toast }) {
           borderTop: '1px solid var(--line)',
           padding: '12px 20px',
           paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
-          zIndex: 35,
+          zIndex: 45,
           boxShadow: '0 -4px 16px rgba(0,0,0,0.05)',
         }}
       >
@@ -432,7 +433,7 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
 
   return (
     <Layout brandTitle="Nouvelle commande" brandSub="Administration">
-      <div style={{ padding: '16px 20px', paddingBottom: 120 }}>
+      <div style={{ padding: '16px 20px', paddingBottom: 160 }}>
         <button onClick={onCancel} style={backBtn}>← Commandes</button>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', margin: '12px 0 4px' }}>Nouvelle commande</h1>
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>{getServiceInfo(service).nom} · {getMagasinInfo(magasin).nom}</p>
@@ -568,6 +569,7 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
 
       {/* Barre d'action sticky en bas */}
       <div
+        className="action-bar-bottom"
         style={{
           position: 'fixed',
           bottom: 0,
@@ -578,7 +580,7 @@ function CreateForm({ service, magasin, userId, onCancel, onDone, toast }) {
           borderTop: '1px solid var(--line)',
           padding: '12px 20px',
           paddingBottom: 'calc(12px + env(safe-area-inset-bottom))',
-          zIndex: 35,
+          zIndex: 45,
           boxShadow: '0 -4px 16px rgba(0,0,0,0.05)',
         }}
       >

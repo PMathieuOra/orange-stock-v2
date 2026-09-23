@@ -4,7 +4,7 @@ import { useStock } from '../hooks/useStock';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useSession } from '../contexts/SessionContext';
-import { PageLoader, Empty, Badge, Button } from '../components/ui';
+import { PageLoader, Empty, Badge, Button, TruncatedName } from '../components/ui';
 import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
 import { touretStatus } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
@@ -38,7 +38,6 @@ export default function Sortie() {
 
   const filtered = useMemo(() => items.filter((it) => {
     if (!it.actif) return false;
-    if (it.qty <= 0) return false;
     if (!matchCategory(it, catFilter)) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase().trim();
@@ -54,16 +53,20 @@ export default function Sortie() {
 
   // Compteurs : uniquement les articles actifs avec stock
   const counts = useMemo(() => {
-    const dispo = items.filter((it) => it.actif && it.qty > 0);
+    const visibles = items.filter((it) => it.actif);
     return {
-      all: dispo.length,
-      conso: dispo.filter((it) => it.type === 'conso').length,
-      fibre: dispo.filter((it) => it.type === 'cable' && norm(it.categorie) === 'fibre').length,
-      cuivre: dispo.filter((it) => it.type === 'cable' && norm(it.categorie) === 'cuivre').length,
+      all: visibles.length,
+      conso: visibles.filter((it) => it.type === 'conso').length,
+      fibre: visibles.filter((it) => it.type === 'cable' && norm(it.categorie) === 'fibre').length,
+      cuivre: visibles.filter((it) => it.type === 'cable' && norm(it.categorie) === 'cuivre').length,
     };
   }, [items]);
 
   async function handleAddClick(item) {
+    if (item.qty <= 0) {
+      toast('Article en rupture de stock', 'error');
+      return;
+    }
     if (item.type === 'conso') {
       addConsoToCart(item);
     } else {
@@ -245,8 +248,9 @@ export default function Sortie() {
               if (it.type === 'conso') catBadge = { label: 'CONSO', color: '#FF7900', bg: '#FFF5EB' };
               else if (norm(it.categorie) === 'fibre') catBadge = { label: 'FIBRE', color: '#00A86B', bg: '#E8F7F0' };
               else if (norm(it.categorie) === 'cuivre') catBadge = { label: 'CUIVRE', color: '#D97706', bg: '#FEF6E7' };
+              const isRupture = it.qty <= 0;
               return (
-                <div key={`${it.type}-${it.service_id}-${it.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)' }}>
+                <div key={`${it.type}-${it.service_id}-${it.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: isRupture ? 'var(--bg)' : 'white', border: '1.5px solid ' + (inCartTotal > 0 ? 'var(--orange)' : 'var(--line)'), borderRadius: 'var(--radius)', opacity: isRupture ? 0.65 : 1 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
                       {svcInfo && <span style={{
@@ -268,7 +272,7 @@ export default function Sortie() {
                         borderRadius: '4px',
                         letterSpacing: '0.05em',
                       }}>{catBadge.label}</span>}
-                      <div title={it.nom} style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nom}</div>
+                      <TruncatedName style={{ fontWeight: 700, fontSize: 14 }}>{it.nom}</TruncatedName>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span className="mono">{it.ref}</span>
@@ -278,27 +282,42 @@ export default function Sortie() {
                       {it.type === 'conso' && it.emplacement && (
                         <span style={{ color: 'var(--orange)', fontWeight: 700 }}>· 📍 {it.emplacement}</span>
                       )}
-                      {it.est_critique && <Badge color="red">⚠ Critique</Badge>}
+                      {isRupture && <Badge color="red">⛔ Rupture</Badge>}
+                      {!isRupture && it.est_critique && <Badge color="red">⚠ Critique</Badge>}
                       {inCartTotal > 0 && <Badge color="orange">🛒 {inCartTotal}{it.type === 'cable' ? 'm' : ''} dans le panier</Badge>}
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleAddClick(it)}
-                    style={{
-                      background: it.type === 'cable' ? 'var(--blue)' : 'var(--orange)',
-                      color: 'white',
-                      border: 'none',
+                  {isRupture ? (
+                    <span style={{
+                      background: 'var(--line-2)',
+                      color: 'var(--ink-4)',
                       borderRadius: '100px',
                       padding: '8px 16px',
                       fontWeight: 700,
                       fontSize: 13,
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
                       whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {it.type === 'cable' ? '🔌 Choisir' : '+ Ajouter'}
-                  </button>
+                    }}>
+                      Rupture
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleAddClick(it)}
+                      style={{
+                        background: it.type === 'cable' ? 'var(--blue)' : 'var(--orange)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '100px',
+                        padding: '8px 16px',
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {it.type === 'cable' ? '🔌 Choisir' : '+ Ajouter'}
+                    </button>
+                  )}
                 </div>
               );
             })}

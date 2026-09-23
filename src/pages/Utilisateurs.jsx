@@ -258,6 +258,9 @@ function UserCard({ u, onClick }) {
           )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
+          {u.trigramme && (
+            <span style={{ display: 'inline-block', background: 'var(--ink)', color: 'white', fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', padding: '1px 6px', borderRadius: 4, marginRight: 6 }}>{u.trigramme}</span>
+          )}
           <span className="mono">{u.identifiant}</span> · {nbSvc} service{nbSvc > 1 ? 's' : ''} · {nbMag} magasin{nbMag > 1 ? 's' : ''}
         </div>
       </div>
@@ -347,6 +350,7 @@ function UserForm({ mode, data, allUsers, availableMagasins = [], availableEquip
   const [services, setServices] = useState(isEdit ? (data.users_services || []).map((s) => s.service_id) : []);
   const [magasins, setMagasins] = useState(isEdit ? (data.users_magasins || []).map((m) => m.magasin_id) : []);
   const [equipeId, setEquipeId] = useState(isEdit ? (data.equipe_id || '') : '');
+  const [trigramme, setTrigramme] = useState(isEdit ? (data.trigramme || '') : '');
   const [saving, setSaving] = useState(false);
 
   function toggleService(id) {
@@ -365,12 +369,12 @@ function UserForm({ mode, data, allUsers, availableMagasins = [], availableEquip
 
     setSaving(true);
     if (isEdit) {
-      const res = await updateUser(data.id, { prenom, initiale, role, services, magasins, equipeId: equipeId || null });
+      const res = await updateUser(data.id, { prenom, initiale, role, services, magasins, equipeId: equipeId || null, trigramme });
       setSaving(false);
       if (res.ok) { toast(`✓ ${prenom} mis à jour`, 'success'); onDone(); }
       else toast('Erreur : ' + res.error, 'error');
     } else {
-      const res = await createUser({ prenom, initiale, role, services, magasins, equipeId: equipeId || null, allUsers });
+      const res = await createUser({ prenom, initiale, role, services, magasins, equipeId: equipeId || null, trigramme, allUsers });
       setSaving(false);
       if (res.ok) {
         toast(`✓ ${prenom} créé. Identifiant : ${res.identifiant}. MDP initial : 0000`, 'success');
@@ -409,6 +413,17 @@ function UserForm({ mode, data, allUsers, availableMagasins = [], availableEquip
               <button key={id} onClick={() => setRole(id)} style={{ flex: 1, padding: 12, background: role === id ? 'var(--orange-light)' : 'white', color: role === id ? 'var(--orange-dark)' : 'var(--ink)', border: `1.5px solid ${role === id ? 'var(--orange)' : 'var(--line)'}`, borderRadius: 'var(--radius)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>{lbl}</button>
             ))}
           </div>
+        </Field>
+
+        <Field label="Trigramme">
+          <input
+            value={trigramme}
+            onChange={(e) => setTrigramme(e.target.value.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase())}
+            maxLength={3}
+            style={{ ...input, textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.15em', maxWidth: 120 }}
+            placeholder="MPA"
+          />
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 4 }}>3 lettres, ex : les initiales du nom complet.</div>
         </Field>
 
         <Field label="Équipe">

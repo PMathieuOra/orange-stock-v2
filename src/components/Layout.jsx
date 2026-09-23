@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { initials, displayName } from '../lib/helpers';
@@ -71,6 +72,16 @@ function Icon({ name, size = 22 }) {
 export default function Layout({ children, brandTitle = "Stock", brandSub = "Orange", allowMultiService = false }) {
   const { user, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+
+  useEffect(() => {
+    function onClick(e) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
 
   const items = NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin);
 
@@ -148,13 +159,9 @@ export default function Layout({ children, brandTitle = "Stock", brandSub = "Ora
           <div className="header-selectors" style={{ display: 'none' }}>
             <SessionSelectors allowMultiService={allowMultiService} />
           </div>
+          <div ref={userMenuRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => {
-              if (confirm('Se déconnecter ?')) {
-                logout();
-                navigate('/login');
-              }
-            }}
+            onClick={() => setUserMenuOpen((o) => !o)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -169,7 +176,7 @@ export default function Layout({ children, brandTitle = "Stock", brandSub = "Ora
               border: 'none',
               fontFamily: 'inherit',
             }}
-            title="Se déconnecter"
+            title="Mon compte"
           >
             <span
               className={user?.avatar_couleur || 'c-orange'}
@@ -205,6 +212,38 @@ export default function Layout({ children, brandTitle = "Stock", brandSub = "Ora
               </span>
             )}
           </button>
+
+          {userMenuOpen && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              right: 0,
+              background: 'white',
+              border: '1.5px solid var(--line)',
+              borderRadius: 'var(--radius)',
+              boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.12))',
+              padding: 6,
+              minWidth: 180,
+              zIndex: 60,
+            }}>
+              <button
+                onClick={() => { setUserMenuOpen(false); navigate('/profil'); }}
+                style={userMenuItem}
+              >
+                👤 Mon profil
+              </button>
+              <button
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  if (confirm('Se déconnecter ?')) { logout(); navigate('/login'); }
+                }}
+                style={{ ...userMenuItem, color: 'var(--red)' }}
+              >
+                ⏻ Se déconnecter
+              </button>
+            </div>
+          )}
+          </div>
         </div>
       </header>
 
@@ -275,10 +314,34 @@ export default function Layout({ children, brandTitle = "Stock", brandSub = "Ora
           .mobile-selectors { display: none !important; }
           .nav-bottom { display: none !important; }
         }
+        @media (min-width: 1200px) {
+          .action-bar-bottom { bottom: 0 !important; z-index: 35 !important; }
+        }
         @media (max-width: 1199px) {
           .user-name-label { display: none; }
+          .action-bar-bottom {
+            bottom: calc(60px + env(safe-area-inset-bottom)) !important;
+            z-index: 45 !important;
+          }
         }
       `}</style>
     </div>
   );
 }
+
+const userMenuItem = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  padding: '10px 12px',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: 13,
+  fontWeight: 700,
+  color: 'var(--ink)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  textAlign: 'left',
+};
