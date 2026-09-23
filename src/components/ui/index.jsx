@@ -1,5 +1,5 @@
 // Kit de composants UI réutilisables, style des prototypes
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 // Nom tronqué qui révèle le nom complet au survol (desktop) ET au tap (mobile).
 // Au tap, le nom se déplie sur place ; re-tap le retronque.
