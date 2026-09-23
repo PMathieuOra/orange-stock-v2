@@ -30,20 +30,45 @@ export function TruncatedName({ children, style = {}, as = 'div', ...props }) {
 
 // Affiche un aperçu photo au survol (PC) et au tap (mobile).
 // `trigger` est l'élément déclencheur (icône, zone…). Si pas de photoUrl, rend juste le trigger sans interaction.
+const PREVIEW_SIZE = 160; // taille de la bulle photo (px)
+
 export function PhotoPreview({ photoUrl, trigger, alt = '' }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null); // { left, top } calculés à l'ouverture
   const wrapRef = useRef(null);
+
+  // Calcule la position de la bulle près de l'icône, en restant dans l'écran
+  function computePosition() {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const bubble = PREVIEW_SIZE + 12; // taille + cadre
+    const margin = 8;
+    // Vertical : au-dessus si assez de place, sinon en dessous
+    const placeAbove = r.top > bubble + margin;
+    const top = placeAbove ? r.top - bubble - margin : r.bottom + margin;
+    // Horizontal : centré sur l'icône, borné aux bords de l'écran
+    let left = r.left + r.width / 2 - bubble / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - bubble - margin));
+    setPos({ left, top });
+  }
+
+  function show() { computePosition(); setOpen(true); }
+  function hide() { setOpen(false); }
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
     }
+    function onScroll() { setOpen(false); }
     document.addEventListener('mousedown', onDocClick);
     document.addEventListener('touchstart', onDocClick);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('touchstart', onDocClick);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -53,43 +78,34 @@ export function PhotoPreview({ photoUrl, trigger, alt = '' }) {
     <span
       ref={wrapRef}
       style={{ display: 'inline-flex', alignItems: 'center' }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={show}
+      onMouseLeave={hide}
     >
       <span
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onClick={(e) => { e.stopPropagation(); open ? hide() : show(); }}
         style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
       >
         {trigger}
       </span>
-      {open && (
+      {open && pos && (
         <div
           onClick={(e) => { e.stopPropagation(); setOpen(false); }}
           style={{
             position: 'fixed',
-            inset: 0,
+            left: pos.left,
+            top: pos.top,
             zIndex: 200,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'rgba(0,0,0,0.4)',
-            padding: 20,
-            cursor: 'zoom-out',
+            background: 'white',
+            padding: 6,
+            borderRadius: 'var(--radius)',
+            border: '1.5px solid var(--line)',
+            boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.18))',
           }}
         >
           <img
             src={photoUrl}
             alt={alt}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              display: 'block',
-              maxWidth: 'min(90vw, 480px)',
-              maxHeight: '80vh',
-              objectFit: 'contain',
-              borderRadius: 'var(--radius)',
-              background: 'white',
-              boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.25))',
-            }}
+            style={{ display: 'block', width: PREVIEW_SIZE, height: PREVIEW_SIZE, objectFit: 'cover', borderRadius: 6 }}
           />
         </div>
       )}
