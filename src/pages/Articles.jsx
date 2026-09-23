@@ -10,13 +10,13 @@ import { Denied, PageLoader, Empty, Badge, Button } from '../components/ui';
 import { touretStatus, fmtPrice } from '../lib/helpers';
 import {
   fetchConsos, createConso, updateConso, toggleConsoActif, deleteConso,
+  uploadConsoPhoto, deleteConsoPhoto,
   fetchCables, createCable, updateCable, toggleCableActif, deleteCable,
   fetchTouretsForCable, createTouret, updateTouretRestante, updateTouretEmplacement, deleteTouret,
   fetchEmplacementsSuggestions, fetchAllTouretsForScope,
 } from '../hooks/useArticles';
 import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables, exportConsos, exportCables } from '../hooks/useImport';
 import { transferTouret } from '../hooks/useTransfert';
-import { generateTouretLabels, downloadPdf, LABEL_FORMATS } from '../lib/labels';
 import { fetchMagasins } from '../hooks/useMagasins';
 
 export default function Articles() {
@@ -233,6 +233,9 @@ export default function Articles() {
           }}>
             {items.map((a) => (
               <button key={a.id} onClick={() => { setDetail({ type: tab, item: a }); setView('detail'); }} style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit', opacity: a.actif ? 1 : 0.5 }}>
+                {tab === 'conso' && a.photo_url && (
+                  <img src={a.photo_url} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)', flexShrink: 0 }} />
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nom}</div>
                   <div style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
@@ -327,7 +330,6 @@ function DetailView({ type, item, activeService, activeMagasin, emplacementSugge
   const [touretsLoading, setTouretsLoading] = useState(false);
   const [showTouretForm, setShowTouretForm] = useState(false);
   const [transferModalTouret, setTransferModalTouret] = useState(null);
-  const [labelModal, setLabelModal] = useState(null); // null | { tourets: [...] }
 
   const loadTourets = useCallback(async () => {
     if (!isCable) return;
@@ -390,6 +392,16 @@ function DetailView({ type, item, activeService, activeMagasin, emplacementSugge
           )}
         </div>
 
+        {!isCable && item.photo_url && (
+          <div style={{ marginBottom: 16 }}>
+            <img
+              src={item.photo_url}
+              alt={item.nom}
+              style={{ width: '100%', maxWidth: 320, maxHeight: 320, objectFit: 'contain', borderRadius: 'var(--radius)', border: '1.5px solid var(--line)', background: 'white' }}
+            />
+          </div>
+        )}
+
         {isCable && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -411,11 +423,6 @@ function DetailView({ type, item, activeService, activeMagasin, emplacementSugge
               <Empty icon="🎰" text="Aucun touret" sub="Ajoutez un touret pour commencer." />
             ) : (
               <>
-                <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button variant="secondary" onClick={() => setLabelModal({ tourets, title: `Planche ${item.nom}` })} style={{ padding: '8px 14px', fontSize: 13 }}>
-                    🖨 Imprimer planche ({tourets.length})
-                  </Button>
-                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tourets.map((t) => (
                     <TouretItem
@@ -427,7 +434,6 @@ function DetailView({ type, item, activeService, activeMagasin, emplacementSugge
                       scopeInfo={{ service: activeService, magasin: activeMagasin }}
                       onUpdate={loadTourets}
                       onTransfer={(touret) => setTransferModalTouret(touret)}
-                      onLabel={(touret) => setLabelModal({ tourets: [touret], title: `Étiquette ${touret.ref_touret}` })}
                       toast={toast}
                     />
                   ))}
@@ -451,21 +457,11 @@ function DetailView({ type, item, activeService, activeMagasin, emplacementSugge
         />
       )}
 
-      {labelModal && (
-        <LabelFormatModal
-          tourets={labelModal.tourets}
-          cable={item}
-          scopeInfo={{ service: activeService, magasin: activeMagasin }}
-          title={labelModal.title}
-          onClose={() => setLabelModal(null)}
-          toast={toast}
-        />
-      )}
     </Layout>
   );
 }
 
-function TouretItem({ touret, suggestions = [], cableInfo = {}, scopeInfo = {}, isAdmin = false, onUpdate, onTransfer, onLabel, toast }) {
+function TouretItem({ touret, suggestions = [], cableInfo = {}, scopeInfo = {}, isAdmin = false, onUpdate, onTransfer, toast }) {
   const [editing, setEditing] = useState(false);
   const [restante, setRestante] = useState(touret.restante);
   const [emplacement, setEmplacement] = useState(touret.emplacement || '');
@@ -533,9 +529,6 @@ function TouretItem({ touret, suggestions = [], cableInfo = {}, scopeInfo = {}, 
         {status !== 'neuf' && <Badge color={statusColors[status]}>{statusLabels[status]}</Badge>}
       </div>
       <button onClick={() => setEditing(true)} title="Modifier" style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
-      {onLabel && (
-        <button onClick={() => onLabel(touret)} title="Imprimer étiquette" style={{ background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit' }}>🖨</button>
-      )}
       {isAdmin && onTransfer && (
         <button onClick={() => onTransfer(touret)} title="Transférer vers un autre périmètre" style={{ background: 'var(--blue-light, #DBEAFE)', color: 'var(--blue)', border: 'none', borderRadius: '100px', width: 32, height: 32, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 800 }}>🔄</button>
       )}
@@ -645,6 +638,10 @@ function FormView({ mode, type, data, service, magasin, userId, emplacementSugge
   const [prixHt, setPrixHt] = useState(isEdit ? (data.prix_ht || 0) : 0);
   const [qty, setQty] = useState(isEdit && !isCable ? (data.qty || 0) : 0);
   const [emplacement, setEmplacement] = useState(isEdit && !isCable ? (data.emplacement || '') : '');
+  const [photoUrl, setPhotoUrl] = useState(isEdit && !isCable ? (data.photo_url || null) : null);
+  const [photoFile, setPhotoFile] = useState(null); // fichier en attente d'upload
+  const [photoPreview, setPhotoPreview] = useState(null); // aperçu local avant upload
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function submit() {
@@ -653,18 +650,35 @@ function FormView({ mode, type, data, service, magasin, userId, emplacementSugge
     if (!nom.trim()) return toast('Nom requis', 'error');
     setSaving(true);
 
+    // Upload de la photo si une nouvelle a été choisie (conso uniquement)
+    let finalPhotoUrl = photoUrl;
+    if (!isCable && photoFile) {
+      setUploadingPhoto(true);
+      const up = await uploadConsoPhoto(photoFile, { service, magasin, ref: ref.trim() });
+      setUploadingPhoto(false);
+      if (!up.ok) {
+        setSaving(false);
+        return toast('Erreur photo : ' + up.error, 'error');
+      }
+      // Si on remplace une ancienne photo, supprimer l'ancienne du storage
+      if (isEdit && data.photo_url && data.photo_url !== up.url) {
+        deleteConsoPhoto(data.photo_url);
+      }
+      finalPhotoUrl = up.url;
+    }
+
     if (isEdit) {
       const fn = isCable ? updateCable : updateConso;
       const refTrim = ref.trim();
       const payload = isCable
         ? { ref_type: refTrim, nom, categorie, seuil, prix_ht: prixHt }
-        : { ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
+        : { ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement, photo_url: finalPhotoUrl, qty: parseInt(qty) || 0, userId, oldQty: data.qty };
       const res = await fn(data.id, payload);
       setSaving(false);
       if (res.ok) {
         const updatedData = isCable
           ? { ...data, ref_type: refTrim || null, nom, categorie, seuil, prix_ht: prixHt }
-          : { ...data, ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement: emplacement?.trim() || null, qty: parseInt(qty) || 0 };
+          : { ...data, ref: refTrim, nom, seuil, prix_ht: prixHt, emplacement: emplacement?.trim() || null, photo_url: finalPhotoUrl, qty: parseInt(qty) || 0 };
         toast(`✓ ${nom} mis à jour`, 'success');
         onDone(updatedData);
       }
@@ -673,12 +687,28 @@ function FormView({ mode, type, data, service, magasin, userId, emplacementSugge
       const fn = isCable ? createCable : createConso;
       const payload = isCable
         ? { ref_type: ref.trim(), nom: nom.trim(), categorie, seuil, prix_ht: prixHt, service, magasin }
-        : { ref: ref.trim(), nom: nom.trim(), seuil, prix_ht: prixHt, emplacement, service, magasin };
+        : { ref: ref.trim(), nom: nom.trim(), seuil, prix_ht: prixHt, emplacement, photo_url: finalPhotoUrl, service, magasin };
       const res = await fn(payload);
       setSaving(false);
       if (res.ok) { toast(`✓ ${nom} créé`, 'success'); onDone(res.data); }
       else toast('Erreur : ' + res.error, 'error');
     }
+  }
+
+  function onPhotoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast('Fichier image attendu', 'error');
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  function removePhoto() {
+    // Retire la photo (sera effacée du storage à l'enregistrement si elle existait)
+    if (isEdit && data.photo_url) deleteConsoPhoto(data.photo_url);
+    setPhotoUrl(null);
+    setPhotoFile(null);
+    setPhotoPreview(null);
   }
 
   return (
@@ -700,6 +730,39 @@ function FormView({ mode, type, data, service, magasin, userId, emplacementSugge
         <Field label="Nom" required>
           <input value={nom} onChange={(e) => setNom(e.target.value)} style={input} placeholder="Nom affiché" />
         </Field>
+
+        {!isCable && (
+          <Field label="Photo">
+            {(photoPreview || photoUrl) ? (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <img
+                  src={photoPreview || photoUrl}
+                  alt="Aperçu"
+                  style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: 'var(--radius)', border: '1.5px solid var(--line)' }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={photoBtn}>
+                    🔄 Remplacer
+                    <input type="file" accept="image/*" onChange={onPhotoChange} style={{ display: 'none' }} />
+                  </label>
+                  <button type="button" onClick={removePhoto} style={{ ...photoBtn, background: 'var(--red-light)', color: 'var(--red)', border: 'none' }}>🗑 Retirer</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <label style={photoBtn}>
+                  📷 Prendre une photo
+                  <input type="file" accept="image/*" capture="environment" onChange={onPhotoChange} style={{ display: 'none' }} />
+                </label>
+                <label style={photoBtn}>
+                  🖼 Choisir un fichier
+                  <input type="file" accept="image/*" onChange={onPhotoChange} style={{ display: 'none' }} />
+                </label>
+              </div>
+            )}
+            {uploadingPhoto && <div style={{ fontSize: 12, color: 'var(--orange)', fontWeight: 700, marginTop: 6 }}>⏳ Envoi de la photo...</div>}
+          </Field>
+        )}
 
         {isCable && (
           <Field label="Catégorie" required>
@@ -760,6 +823,7 @@ function FormView({ mode, type, data, service, magasin, userId, emplacementSugge
 
 // ===== shared =====
 const backBtn = { background: 'none', border: 'none', color: 'var(--ink-3)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
+const photoBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--ink)' };
 const card = { display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'white', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)' };
 const fieldLabel = { fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 };
 const input = { width: '100%', padding: 12, border: '1.5px solid var(--line)', borderRadius: 'var(--radius)', background: 'white', fontFamily: 'inherit', fontSize: 15, fontWeight: 600, color: 'var(--ink)', outline: 'none' };
@@ -1162,94 +1226,6 @@ function TransferModal({ touret, cable, currentService, currentMagasin, userId, 
 }
 
 // ===== MODAL FORMAT ÉTIQUETTES =====
-function LabelFormatModal({ tourets, cable, scopeInfo, title, onClose, toast }) {
-  const [format, setFormat] = useState('medium');
-  const [generating, setGenerating] = useState(false);
-
-  async function generate() {
-    setGenerating(true);
-    try {
-      const magasinInfo = getMagasinInfo(scopeInfo?.magasin);
-      const data = tourets.map((t) => ({
-        ref_touret: t.ref_touret,
-        initiale: t.initiale,
-        restante: t.restante,
-        nom_cable: cable?.nom || '',
-        categorie: cable?.categorie || '',
-        ref_type: cable?.ref_type || '',
-        emplacement: t.emplacement || '',
-        magasin: magasinInfo?.nom || '',
-      }));
-      const doc = await generateTouretLabels(data, { format, title });
-      downloadPdf(doc, `etiquettes-tourets-${Date.now()}.pdf`);
-      toast(`✓ PDF généré (${tourets.length} étiquette${tourets.length > 1 ? 's' : ''})`, 'success');
-      onClose();
-    } catch (err) {
-      console.error(err);
-      toast('Erreur génération PDF : ' + err.message, 'error');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  return (
-    <div onClick={onClose} style={modalBackdrop}>
-      <div onClick={(e) => e.stopPropagation()} style={modalPanel}>
-        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid var(--line)' }}>
-          <div style={{ fontSize: 11, color: 'var(--orange)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-            🖨 Générer les étiquettes PDF
-          </div>
-          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>
-            {tourets.length} étiquette{tourets.length > 1 ? 's' : ''} à imprimer
-          </h2>
-        </div>
-
-        <div style={{ padding: 20 }}>
-          <label style={fieldLabelTransfer}>Format des étiquettes</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {Object.values(LABEL_FORMATS).map((f) => {
-              const active = format === f.id;
-              const pages = Math.ceil(tourets.length / f.perPage);
-              return (
-                <button
-                  key={f.id}
-                  onClick={() => setFormat(f.id)}
-                  style={{
-                    padding: '14px 16px',
-                    background: active ? 'var(--orange-light)' : 'white',
-                    border: `1.5px solid ${active ? 'var(--orange)' : 'var(--line)'}`,
-                    borderRadius: 'var(--radius)',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    textAlign: 'left',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: active ? 'var(--orange-dark)' : 'var(--ink)' }}>{f.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, marginTop: 2 }}>
-                      {tourets.length} étiquette{tourets.length > 1 ? 's' : ''} → {pages} page{pages > 1 ? 's' : ''} A4
-                    </div>
-                  </div>
-                  {active && <span style={{ fontSize: 18, color: 'var(--orange)' }}>✓</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ padding: 14, borderTop: '1px solid var(--line)', display: 'flex', gap: 10 }}>
-          <Button variant="secondary" onClick={onClose} style={{ flex: 1 }}>Annuler</Button>
-          <Button onClick={generate} disabled={generating} style={{ flex: 1 }}>
-            {generating ? '...' : '🖨 Générer PDF'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const modalBackdrop = {
   position: 'fixed',
