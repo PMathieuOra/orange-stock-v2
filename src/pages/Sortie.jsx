@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useStock } from '../hooks/useStock';
 import { useToast } from '../contexts/ToastContext';
@@ -8,11 +8,14 @@ import { PageLoader, Empty, Badge, Button, TruncatedName, PhotoPreview } from '.
 import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
 import { touretStatus } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
+import { fetchPaniersTypes } from '../hooks/usePaniersTypes';
+import PaniersTypesManager from '../components/PaniersTypesManager';
+import { getMagasinInfo } from '../components/SessionSelectors';
 
 export default function Sortie() {
   const { items, loading, error, refetch } = useStock();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { magasin, isMultiService } = useSession();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState([]);
@@ -20,6 +23,16 @@ export default function Sortie() {
   const [note, setNote] = useState('');
   const [validating, setValidating] = useState(false);
   const [catFilter, setCatFilter] = useState('all'); // 'all' | 'conso' | 'fibre' | 'cuivre'
+  const [paniersTypes, setPaniersTypes] = useState([]);
+  const [managePaniers, setManagePaniers] = useState(false);
+
+  // Charger les paniers types du magasin actif
+  const loadPaniers = useCallback(async () => {
+    if (!magasin) return;
+    const res = await fetchPaniersTypes(magasin);
+    setPaniersTypes(res.data || []);
+  }, [magasin]);
+  useEffect(() => { loadPaniers(); }, [loadPaniers]);
 
   // Sélecteur de touret (quand on clique sur un câble)
   const [touretPicker, setTouretPicker] = useState(null); // {item, tourets, loading}
@@ -102,6 +115,41 @@ export default function Sortie() {
     });
   }
 
+  // Charge un panier type : ajoute ses consommables au panier avec une quantité à 0
+  function loadPanierType(panier) {
+    const lignes = panier.paniers_types_lignes || [];
+    if (lignes.length === 0) return toast('Ce panier type est vide', 'error');
+
+    // Index des consommables du stock actif par ref
+    const consoByRef = {};
+    items.forEach((it) => { if (it.type === 'conso') consoByRef[it.ref] = it; });
+
+    let added = 0;
+    const introuvables = [];
+    setCart((c) => {
+      const next = [...c];
+      lignes.forEach((l) => {
+        const item = consoByRef[l.ref];
+        if (!item) { introuvables.push(l.nom || l.ref); return; }
+        // Ne pas doublonner si déjà au panier (même ref + service)
+        const exists = next.some((x) => x.ref === item.ref && x.type === 'conso' && x.service_id === item.service_id);
+        if (exists) return;
+        next.push({ ref: item.ref, nom: item.nom, type: 'conso', qty: 0, qtyDispo: item.qty, service_id: item.service_id });
+        added += 1;
+      });
+      return next;
+    });
+
+    if (added > 0) {
+      toast(`🧺 ${panier.nom} : ${added} article${added > 1 ? 's' : ''} ajouté${added > 1 ? 's' : ''} (quantités à ajuster)`, 'success');
+      setCartOpen(true);
+    } else if (introuvables.length > 0) {
+      toast('Aucun article de ce panier n\'est disponible dans ce périmètre', 'error');
+    } else {
+      toast('Tous les articles sont déjà dans le panier', 'success');
+    }
+  }
+
   function addCableToCart(item, touret, qty) {
     const q = parseInt(qty) || 0;
     if (q <= 0) return toast('Quantité invalide', 'error');
@@ -137,7 +185,9 @@ export default function Sortie() {
       if (i !== idx) return x;
       const newQty = Math.max(0, Math.min(qty, x.qtyDispo));
       return { ...x, qty: newQty };
-    }).filter((x) => x.qty > 0));
+    }));
+    // NB : une ligne à 0 reste dans le panier (utile pour les paniers types) ;
+    // elle est ignorée à la validation et se retire via le bouton dédié.
   }
 
   function removeFromCart(idx) {
@@ -151,16 +201,22 @@ export default function Sortie() {
 
   async function handleValidate() {
     if (cart.length === 0) return;
+    // Ignorer les lignes laissées à 0 (ex : panier type non ajusté)
+    const lignes = cart.filter((x) => x.qty > 0);
+    if (lignes.length === 0) {
+      toast('Ajustez au moins une quantité avant de valider', 'error');
+      return;
+    }
     setValidating(true);
     const res = await validateSortie({
-      cart,
+      cart: lignes,
       magasin,
       userId: user.id,
       note: note.trim(),
     });
     setValidating(false);
     if (res.ok) {
-      toast(`✓ Sortie validée : ${cart.length} ligne(s)`, 'success');
+      toast(`✓ Sortie validée : ${lignes.length} ligne(s)`, 'success');
       clearCart();
       setCartOpen(false);
       refetch();
@@ -178,6 +234,50 @@ export default function Sortie() {
         <p style={{ color: 'var(--ink-3)', fontSize: 14, marginBottom: 16 }}>
           Sélectionnez les articles à sortir.
         </p>
+
+        {/* Paniers types du magasin */}
+        {(paniersTypes.length > 0 || isAdmin) && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+              🧺 Paniers types
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {paniersTypes.map((p) => {
+                const n = (p.paniers_types_lignes || []).length;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => loadPanierType(p)}
+                    title={`Charger ${n} article${n > 1 ? 's' : ''} au panier`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px', background: 'white',
+                      border: '1.5px solid var(--orange)', borderRadius: '100px',
+                      cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, color: 'var(--orange-dark)',
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>🧺</span>
+                    <span>{p.nom}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'var(--orange-light)', color: 'var(--orange-dark)', padding: '1px 7px', borderRadius: 100 }}>{n}</span>
+                  </button>
+                );
+              })}
+              {isAdmin && (
+                <button
+                  onClick={() => setManagePaniers(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', background: 'var(--bg)',
+                    border: '1.5px dashed var(--line)', borderRadius: '100px',
+                    cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)',
+                  }}
+                >
+                  ⚙️ Gérer les paniers types
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <input
           placeholder="🔍 Rechercher par référence, nom ou n° de touret..."
@@ -370,6 +470,16 @@ export default function Sortie() {
           onClear={clearCart}
           onValidate={handleValidate}
           validating={validating}
+        />
+      )}
+
+      {managePaniers && (
+        <PaniersTypesManager
+          magasin={magasin}
+          magasinNom={getMagasinInfo(magasin)?.nom}
+          userId={user.id}
+          onClose={() => { setManagePaniers(false); loadPaniers(); }}
+          toast={toast}
         />
       )}
     </Layout>
@@ -569,7 +679,10 @@ function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, 
           {cart.map((item, idx) => (
             <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: '1px solid var(--line-2)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{item.nom}</div>
+                <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {item.nom}
+                  {item.qty === 0 && <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--orange-dark)', background: 'var(--orange-light)', padding: '1px 6px', borderRadius: 4 }}>à ajuster</span>}
+                </div>
                 <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600 }}>
                   {item.ref}
                   {item.type === 'cable' && ` · 🎰 ${item.touretRef}`}
@@ -580,7 +693,7 @@ function CartModal({ cart, note, setNote, onClose, onSetQty, onRemove, onClear, 
                 <button onClick={() => onSetQty(idx, item.qty - 1)} style={qtyBtn}>−</button>
                 <input
                   type="number"
-                  min="1"
+                  min="0"
                   max={item.qtyDispo}
                   value={item.qty}
                   onChange={(e) => onSetQty(idx, parseInt(e.target.value) || 0)}
