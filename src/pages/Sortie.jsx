@@ -9,14 +9,12 @@ import { validateSortie, fetchTouretsForRef } from '../hooks/useSortie';
 import { touretStatus } from '../lib/helpers';
 import { getServiceInfo } from '../lib/supabase';
 import { fetchPaniersTypes } from '../hooks/usePaniersTypes';
-import PaniersTypesManager from '../components/PaniersTypesManager';
-import { getMagasinInfo } from '../components/SessionSelectors';
 
 export default function Sortie() {
   const { items, loading, error, refetch } = useStock();
   const { toast } = useToast();
-  const { user, isAdmin } = useAuth();
-  const { magasin, isMultiService } = useSession();
+  const { user } = useAuth();
+  const { services, magasin, isMultiService } = useSession();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -24,14 +22,17 @@ export default function Sortie() {
   const [validating, setValidating] = useState(false);
   const [catFilter, setCatFilter] = useState('all'); // 'all' | 'conso' | 'fibre' | 'cuivre'
   const [paniersTypes, setPaniersTypes] = useState([]);
-  const [managePaniers, setManagePaniers] = useState(false);
 
-  // Charger les paniers types du magasin actif
+  // Charger les paniers types des services cochés dans ce magasin
+  const servicesKey = (services || []).join(',');
   const loadPaniers = useCallback(async () => {
-    if (!magasin) return;
-    const res = await fetchPaniersTypes(magasin);
-    setPaniersTypes(res.data || []);
-  }, [magasin]);
+    if (!magasin || !servicesKey) { setPaniersTypes([]); return; }
+    const svcList = servicesKey.split(',');
+    const results = await Promise.all(svcList.map((s) => fetchPaniersTypes(s, magasin)));
+    const all = [];
+    results.forEach((r) => { if (r.ok) all.push(...(r.data || [])); });
+    setPaniersTypes(all);
+  }, [servicesKey, magasin]);
   useEffect(() => { loadPaniers(); }, [loadPaniers]);
 
   // Sélecteur de touret (quand on clique sur un câble)
@@ -120,9 +121,11 @@ export default function Sortie() {
     const lignes = panier.paniers_types_lignes || [];
     if (lignes.length === 0) return toast('Ce panier type est vide', 'error');
 
-    // Index des consommables du stock actif par ref
+    // Index des consommables du stock actif par ref, pour le service du panier
     const consoByRef = {};
-    items.forEach((it) => { if (it.type === 'conso') consoByRef[it.ref] = it; });
+    items.forEach((it) => {
+      if (it.type === 'conso' && it.service_id === panier.service_id) consoByRef[it.ref] = it;
+    });
 
     let added = 0;
     const introuvables = [];
@@ -235,8 +238,8 @@ export default function Sortie() {
           Sélectionnez les articles à sortir.
         </p>
 
-        {/* Paniers types du magasin */}
-        {(paniersTypes.length > 0 || isAdmin) && (
+        {/* Paniers types du périmètre */}
+        {paniersTypes.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
               🧺 Paniers types
@@ -244,6 +247,7 @@ export default function Sortie() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {paniersTypes.map((p) => {
                 const n = (p.paniers_types_lignes || []).length;
+                const psvc = isMultiService ? getServiceInfo(p.service_id) : null;
                 return (
                   <button
                     key={p.id}
@@ -257,24 +261,12 @@ export default function Sortie() {
                     }}
                   >
                     <span style={{ fontSize: 15 }}>🧺</span>
+                    {psvc && <span style={{ fontSize: 11 }}>{psvc.icon}</span>}
                     <span>{p.nom}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, background: 'var(--orange-light)', color: 'var(--orange-dark)', padding: '1px 7px', borderRadius: 100 }}>{n}</span>
                   </button>
                 );
               })}
-              {isAdmin && (
-                <button
-                  onClick={() => setManagePaniers(true)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '8px 14px', background: 'var(--bg)',
-                    border: '1.5px dashed var(--line)', borderRadius: '100px',
-                    cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 13, color: 'var(--ink-3)',
-                  }}
-                >
-                  ⚙️ Gérer les paniers types
-                </button>
-              )}
             </div>
           </div>
         )}
@@ -470,16 +462,6 @@ export default function Sortie() {
           onClear={clearCart}
           onValidate={handleValidate}
           validating={validating}
-        />
-      )}
-
-      {managePaniers && (
-        <PaniersTypesManager
-          magasin={magasin}
-          magasinNom={getMagasinInfo(magasin)?.nom}
-          userId={user.id}
-          onClose={() => { setManagePaniers(false); loadPaniers(); }}
-          toast={toast}
         />
       )}
     </Layout>

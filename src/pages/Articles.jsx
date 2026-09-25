@@ -18,6 +18,7 @@ import {
 import { downloadConsoTemplate, downloadCableTemplate, parseFile, parseCableFile, importConsos, importCables, exportConsos, exportCables } from '../hooks/useImport';
 import { transferTouret } from '../hooks/useTransfert';
 import { fetchMagasins } from '../hooks/useMagasins';
+import PaniersTypesManager from '../components/PaniersTypesManager';
 
 export default function Articles() {
   const { isAdmin, user: currentUser } = useAuth();
@@ -38,6 +39,7 @@ export default function Articles() {
   const [detail, setDetail] = useState(null); // {type, item}
   const [form, setForm] = useState(null); // {mode: 'create'|'edit', type, data}
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [paniersOpen, setPaniersOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [emplacementSuggestions, setEmplacementSuggestions] = useState([]);
@@ -188,6 +190,11 @@ export default function Articles() {
             <Button variant="secondary" onClick={handleExport} disabled={exporting}>
               {exporting ? '⏳ Export...' : '📤 Exporter'}
             </Button>
+            {tab === 'conso' && (
+              <Button variant="secondary" onClick={() => setPaniersOpen(true)}>
+                🧺 Paniers types
+              </Button>
+            )}
             <Button onClick={() => { setForm({ mode: 'create', type: tab, data: null }); setView('form'); }}>
               + Nouveau
             </Button>
@@ -265,6 +272,17 @@ export default function Articles() {
             magasin={activeMagasin}
             onClose={() => setImportModalOpen(false)}
             onDone={() => { setImportModalOpen(false); fetchData(); }}
+            toast={toast}
+          />
+        )}
+
+        {paniersOpen && (
+          <PaniersTypesManager
+            service={activeService}
+            magasin={activeMagasin}
+            magasinNom={getMagasinInfo(activeMagasin)?.nom}
+            userId={currentUser?.id}
+            onClose={() => setPaniersOpen(false)}
             toast={toast}
           />
         )}

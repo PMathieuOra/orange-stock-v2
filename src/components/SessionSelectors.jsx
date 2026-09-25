@@ -10,11 +10,22 @@ const MAGASINS_REF = [
   { id: 'reims', nom: 'Reims', icon: '🏪' },
 ];
 
+// Cache partagé des magasins réels (alimenté depuis la base au chargement).
+// Permet à getMagasinInfo d'afficher le vrai nom/icône partout, y compris
+// pour les magasins créés après coup (absents de MAGASINS_REF).
+const MAGASINS_CACHE = {}; // { id: {nom, icon} }
+
+export function primeMagasinsCache(list) {
+  (list || []).forEach((m) => { MAGASINS_CACHE[m.id] = { nom: m.nom, icon: m.icon || '🏪' }; });
+}
+
 function getMagasinInfo(id) {
+  if (MAGASINS_CACHE[id]) return { id, ...MAGASINS_CACHE[id] };
   return MAGASINS_REF.find((m) => m.id === id) || { id, nom: id, icon: '📍' };
 }
 
-function MagasinPill({ current, options, onSelect, beforeChange }) {
+function MagasinPill({ current, options, onSelect, beforeChange, infoFn }) {
+  const resolve = infoFn || getMagasinInfo;
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -25,7 +36,7 @@ function MagasinPill({ current, options, onSelect, beforeChange }) {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const info = getMagasinInfo(current);
+  const info = resolve(current);
   const canSwitch = options.length > 1;
 
   return (
@@ -43,7 +54,7 @@ function MagasinPill({ current, options, onSelect, beforeChange }) {
         <div style={dropdownStyle}>
           <div style={dropdownHeader}>Changer de magasin</div>
           {options.map((id) => {
-            const oInfo = getMagasinInfo(id);
+            const oInfo = resolve(id);
             const active = id === current;
             return (
               <button key={id} onClick={() => {
@@ -176,24 +187,38 @@ export default function SessionSelectors({ beforeServiceChange, beforeMagasinCha
   const { service, services, magasin, changeService, toggleService, changeMagasin } = useSession();
   const { toast } = useToast();
   const [magasinServices, setMagasinServices] = useState({}); // { magasinId: [service_ids] }
+  const [magasinInfos, setMagasinInfos] = useState({}); // { magasinId: {nom, icon} }
 
-  // Charger la liste des services hébergés par chaque magasin de l'utilisateur
+  // Charger la liste des services hébergés par chaque magasin + le nom/icône réels
   useEffect(() => {
     if (!user || !user.magasins || user.magasins.length === 0) return;
     (async () => {
-      const { data, error } = await supabase
-        .from('magasins_services')
-        .select('magasin_id, service_id')
-        .in('magasin_id', user.magasins);
-      if (error || !data) return;
-      const map = {};
-      data.forEach((row) => {
-        if (!map[row.magasin_id]) map[row.magasin_id] = [];
-        map[row.magasin_id].push(row.service_id);
-      });
-      setMagasinServices(map);
+      const [msRes, magRes] = await Promise.all([
+        supabase.from('magasins_services').select('magasin_id, service_id').in('magasin_id', user.magasins),
+        supabase.from('magasins').select('id, nom, icon').in('id', user.magasins),
+      ]);
+      if (msRes.data) {
+        const map = {};
+        msRes.data.forEach((row) => {
+          if (!map[row.magasin_id]) map[row.magasin_id] = [];
+          map[row.magasin_id].push(row.service_id);
+        });
+        setMagasinServices(map);
+      }
+      if (magRes.data) {
+        primeMagasinsCache(magRes.data); // alimente le cache global partagé
+        const infos = {};
+        magRes.data.forEach((m) => { infos[m.id] = { nom: m.nom, icon: m.icon || '🏪' }; });
+        setMagasinInfos(infos);
+      }
     })();
   }, [user]);
+
+  // Info magasin : le cache/base d'abord (getMagasinInfo lit le cache), état local en secours réactif
+  function magInfo(id) {
+    if (magasinInfos[id]) return { id, ...magasinInfos[id] };
+    return getMagasinInfo(id);
+  }
 
   // Services disponibles = intersection (droits user) ∩ (services hébergés dans le magasin actuel)
   const servicesInCurrentMagasin = magasinServices[magasin] || [];
@@ -243,10 +268,11 @@ export default function SessionSelectors({ beforeServiceChange, beforeMagasinCha
       <MagasinPill
         current={magasin}
         options={user.magasins}
+        infoFn={magInfo}
         beforeChange={beforeMagasinChange}
         onSelect={(id) => {
           changeMagasin(id);
-          toast(`Magasin : ${getMagasinInfo(id).nom}`, 'success');
+          toast(`Magasin : ${magInfo(id).nom}`, 'success');
         }}
       />
     </div>

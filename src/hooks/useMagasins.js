@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { primeMagasinsCache } from '../components/SessionSelectors';
 
 // Liste tous les magasins avec leurs services
 export async function fetchMagasins() {
@@ -6,6 +7,8 @@ export async function fetchMagasins() {
     .from('magasins')
     .select('*, magasins_services(service_id)')
     .order('nom');
+  // Alimente le cache partagé pour que getMagasinInfo affiche partout le vrai nom/icône
+  if (data) { try { primeMagasinsCache(data); } catch (e) { /* ignore */ } }
   return { ok: !error, data: data || [], error: error?.message };
 }
 

@@ -1,41 +1,33 @@
 import { supabase } from '../lib/supabase';
+import { fetchConsos } from './useArticles';
 
-// Liste les consommables actifs d'un magasin (tous services), dédupliqués par référence.
-// Sert au sélecteur d'articles lors de la création d'un panier type.
-export async function fetchConsosByMagasin(magasin) {
-  const { data, error } = await supabase
-    .from('articles_conso')
-    .select('ref, nom')
-    .eq('magasin_id', magasin)
-    .eq('actif', true)
-    .order('nom');
-  if (error) return { ok: false, data: [], error: error.message };
-  // Dédupliquer par ref (un même consommable peut exister sur plusieurs services)
-  const seen = new Set();
-  const uniq = [];
-  (data || []).forEach((a) => {
-    if (!seen.has(a.ref)) { seen.add(a.ref); uniq.push(a); }
-  });
-  return { ok: true, data: uniq };
+// Liste les consommables actifs d'un couple (service, magasin) pour le sélecteur.
+export async function fetchConsosForScope(service, magasin) {
+  const res = await fetchConsos(service, magasin);
+  if (!res.ok) return { ok: false, data: [], error: res.error };
+  const list = (res.data || []).filter((a) => a.actif !== false)
+    .map((a) => ({ ref: a.ref, nom: a.nom }));
+  return { ok: true, data: list };
 }
 
-// Liste les paniers types d'un magasin, avec leurs lignes
-export async function fetchPaniersTypes(magasin) {
+// Liste les paniers types d'un couple (service, magasin), avec leurs lignes
+export async function fetchPaniersTypes(service, magasin) {
   const { data, error } = await supabase
     .from('paniers_types')
     .select('*, paniers_types_lignes(id, ref, nom)')
+    .eq('service_id', service)
     .eq('magasin_id', magasin)
     .eq('actif', true)
     .order('nom');
   return { ok: !error, data: data || [], error: error?.message };
 }
 
-// Crée un panier type avec ses lignes (refs de consommables)
-export async function createPanierType({ nom, magasin, lignes, userId }) {
+// Crée un panier type pour un couple (service, magasin)
+export async function createPanierType({ nom, service, magasin, lignes, userId }) {
   if (!nom || !nom.trim()) return { ok: false, error: 'Nom requis' };
   const { data: panier, error } = await supabase
     .from('paniers_types')
-    .insert({ nom: nom.trim(), magasin_id: magasin, actif: true, cree_par: userId || null })
+    .insert({ nom: nom.trim(), service_id: service, magasin_id: magasin, actif: true, cree_par: userId || null })
     .select()
     .single();
   if (error) return { ok: false, error: error.message };
@@ -55,7 +47,6 @@ export async function updatePanierType(id, { nom, lignes }) {
     if (error) return { ok: false, error: error.message };
   }
   if (lignes !== undefined) {
-    // Remplacer toutes les lignes
     await supabase.from('paniers_types_lignes').delete().eq('panier_id', id);
     if (lignes.length > 0) {
       const rows = lignes.map((l) => ({ panier_id: id, ref: l.ref, nom: l.nom || null }));

@@ -2,21 +2,23 @@ import { useState, useEffect, useCallback } from 'react';
 import { Button, PageLoader, Empty } from './ui';
 import {
   fetchPaniersTypes, createPanierType, updatePanierType, deletePanierType,
-  fetchConsosByMagasin,
+  fetchConsosForScope,
 } from '../hooks/usePaniersTypes';
+import { getServiceInfo } from '../lib/supabase';
 
-// Modale principale : liste des paniers types du magasin + création/édition.
-export default function PaniersTypesManager({ magasin, magasinNom, userId, onClose, toast }) {
+// Modale de gestion des paniers types pour un couple (service, magasin) précis.
+export default function PaniersTypesManager({ service, magasin, magasinNom, userId, onClose, toast }) {
   const [paniers, setPaniers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null); // {mode, data}
+  const svcInfo = getServiceInfo(service);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetchPaniersTypes(magasin);
+    const res = await fetchPaniersTypes(service, magasin);
     setPaniers(res.data || []);
     setLoading(false);
-  }, [magasin]);
+  }, [service, magasin]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -34,7 +36,8 @@ export default function PaniersTypesManager({ magasin, magasinNom, userId, onClo
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>🧺 Paniers types</h2>
             <p style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 600, margin: '4px 0 0' }}>
-              Modèles de panier pour {magasinNom || 'ce magasin'}.
+              <span style={{ color: svcInfo.couleur, fontWeight: 800 }}>{svcInfo.icon} {svcInfo.nom}</span>
+              {' · '}{magasinNom || 'ce magasin'}
             </p>
           </div>
           <Button onClick={() => setForm({ mode: 'create' })} style={{ padding: '8px 14px', fontSize: 13, flexShrink: 0 }}>+ Nouveau</Button>
@@ -44,7 +47,7 @@ export default function PaniersTypesManager({ magasin, magasinNom, userId, onClo
           {loading ? (
             <PageLoader />
           ) : paniers.length === 0 ? (
-            <Empty icon="🧺" text="Aucun panier type" sub="Créez un modèle de panier pour accélérer les sorties récurrentes." />
+            <Empty icon="🧺" text="Aucun panier type" sub="Créez un modèle pour ce service et ce magasin." />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {paniers.map((p) => {
@@ -74,6 +77,7 @@ export default function PaniersTypesManager({ magasin, magasinNom, userId, onClo
         <PanierForm
           mode={form.mode}
           data={form.data}
+          service={service}
           magasin={magasin}
           userId={userId}
           onClose={() => setForm(null)}
@@ -85,8 +89,7 @@ export default function PaniersTypesManager({ magasin, magasinNom, userId, onClo
   );
 }
 
-// Formulaire création/édition d'un panier type
-function PanierForm({ mode, data, magasin, userId, onClose, onDone, toast }) {
+function PanierForm({ mode, data, service, magasin, userId, onClose, onDone, toast }) {
   const isEdit = mode === 'edit';
   const [nom, setNom] = useState(isEdit ? data.nom : '');
   const [selected, setSelected] = useState(isEdit ? (data.paniers_types_lignes || []).map((l) => ({ ref: l.ref, nom: l.nom })) : []);
@@ -96,8 +99,8 @@ function PanierForm({ mode, data, magasin, userId, onClose, onDone, toast }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchConsosByMagasin(magasin).then((r) => { setConsos(r.data || []); setLoading(false); });
-  }, [magasin]);
+    fetchConsosForScope(service, magasin).then((r) => { setConsos(r.data || []); setLoading(false); });
+  }, [service, magasin]);
 
   const selectedRefs = new Set(selected.map((s) => s.ref));
   const filtered = search.trim()
@@ -116,7 +119,7 @@ function PanierForm({ mode, data, magasin, userId, onClose, onDone, toast }) {
     setSaving(true);
     const res = isEdit
       ? await updatePanierType(data.id, { nom, lignes: selected })
-      : await createPanierType({ nom, magasin, lignes: selected, userId });
+      : await createPanierType({ nom, service, magasin, lignes: selected, userId });
     setSaving(false);
     if (res.ok) { toast(isEdit ? `✓ ${nom} mis à jour` : `✓ ${nom} créé`, 'success'); onDone(); }
     else toast('Erreur : ' + res.error, 'error');
@@ -138,7 +141,7 @@ function PanierForm({ mode, data, magasin, userId, onClose, onDone, toast }) {
 
           {loading ? <PageLoader /> : filtered.length === 0 ? (
             <div style={{ fontSize: 13, color: 'var(--ink-4)', fontStyle: 'italic', textAlign: 'center', padding: 16 }}>
-              {search ? 'Aucun consommable trouvé' : 'Aucun consommable dans ce magasin'}
+              {search ? 'Aucun consommable trouvé' : 'Aucun consommable pour ce service et ce magasin'}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 280, overflowY: 'auto' }}>
